@@ -10,9 +10,12 @@ import './styles/base.css';
 import './styles/shell.css';
 import './styles/apps.css';
 import { App } from './App';
+import { RootErrorBoundary } from './shell/RootErrorBoundary';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <RootErrorBoundary>
+      <App />
+    </RootErrorBoundary>
   </StrictMode>,
 );
