@@ -15,6 +15,7 @@ _Last updated: 2026-10-29_
 - Desktop shell: boot/login/shutdown screens, top bar, dock (bottom/left/right, auto-hide), launcher with app and file search, desktop icons, context menus, dialogs, toasts, notification panel, keyboard shortcuts, root and per-window error boundaries
 - Apps: Pyxis Terminal (psh, 35+ commands, pipes/redirection, completion, history), Files, Text Editor, System Center, System Monitor, Settings, Architecture Explorer, Astral Intelligence (rule-based), Event Journal, About
 - Documentation: README, NOTICE (provenance and third-party licences)
+- CI: GitHub Actions workflow running typecheck, tests and build on push/PR, with GitHub Pages deployment of `main`
 
 ## Tests (last run 2026-10-29)
 
@@ -30,17 +31,16 @@ Manual browser verification (Chromium, 1366×800 and 375×812): boot → login �
 ## Known defects / limitations
 
 - No end-to-end browser test suite in CI yet (integration tests run in jsdom; manual browser checks listed above).
-- No CI workflow is committed (the access token used for development may not carry the `workflow` permission).
+- GitHub Pages deployment requires Pages to be enabled once in repository settings (Source: GitHub Actions); the development token cannot change that setting. Until then the CI deploy job fails while the verify job passes.
 - Editor is a plain textarea (no syntax highlighting or undo history beyond the browser's own).
 - Only text files are supported in the virtual filesystem.
 - See README → "Simulation vs. native capabilities" for intentional simulation boundaries.
 
 ## Possible next steps
 
-1. Add a GitHub Actions workflow for typecheck/test/build and optional GitHub Pages deployment.
-2. Add Playwright end-to-end tests for drag/resize and persistence in real browsers.
-3. Drag-and-drop between Files windows and onto the desktop.
-4. Additional utilities (e.g. image viewer for imported images) if they fit the demo.
+1. Add Playwright end-to-end tests for drag/resize and persistence in real browsers.
+2. Drag-and-drop between Files windows and onto the desktop.
+3. Additional utilities (e.g. image viewer for imported images) if they fit the demo.
 
 ## Resume development
 

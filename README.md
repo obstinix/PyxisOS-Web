@@ -104,7 +104,7 @@ npm test           # unit + integration tests
 npm run typecheck
 ```
 
-The production build is static (relative asset paths), so `dist/` can be hosted on any static file host, including GitHub Pages. After the first load the desktop works offline; fonts are bundled locally and the app makes no network requests.
+The production build is static (relative asset paths), so `dist/` can be hosted on any static file host. The `CI` workflow (`.github/workflows/ci.yml`) runs typecheck, tests and build on every push and pull request, and deploys `main` to GitHub Pages at https://obstinix.github.io/PyxisOS-Web/ once Pages is enabled with **Settings → Pages → Source: GitHub Actions**. After the first load the desktop works offline; fonts are bundled locally and the app makes no network requests.
 
 Supported browsers: current Chrome, Edge, Firefox and Safari. The JS heap metric is only available in Chromium-based browsers.
 
