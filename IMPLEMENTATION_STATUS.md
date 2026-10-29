@@ -16,6 +16,7 @@ _Last updated: 2026-10-29_
 - Apps: Pyxis Terminal (psh, 35+ commands, pipes/redirection, completion, history), Files, Text Editor, System Center, System Monitor, Settings, Architecture Explorer, Astral Intelligence (rule-based), Event Journal, About
 - Documentation: README, NOTICE (provenance and third-party licences)
 - CI: GitHub Actions workflow running typecheck, tests and build on push/PR, with GitHub Pages deployment of `main`
+- Live deployment: https://obstinix.github.io/PyxisOS-Web/ (first successful deploy: run 40851314287; earlier deploy failures happened before Pages was enabled)
 
 ## Tests (last run 2026-10-29)
 
@@ -31,7 +32,6 @@ Manual browser verification (Chromium, 1366×800 and 375×812): boot → login �
 ## Known defects / limitations
 
 - No end-to-end browser test suite in CI yet (integration tests run in jsdom; manual browser checks listed above).
-- GitHub Pages deployment requires Pages to be enabled once in repository settings (Source: GitHub Actions); the development token cannot change that setting. Until then the CI deploy job fails while the verify job passes.
 - Editor is a plain textarea (no syntax highlighting or undo history beyond the browser's own).
 - Only text files are supported in the virtual filesystem.
 - See README → "Simulation vs. native capabilities" for intentional simulation boundaries.

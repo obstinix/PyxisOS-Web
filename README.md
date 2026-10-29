@@ -1,5 +1,7 @@
 # PyxisOS-Web
 
+**Live demo:** https://obstinix.github.io/PyxisOS-Web/
+
 **LUNAR-PYXIS // BETA · VERSION 0.1.0**
 
 PyxisOS-Web is a browser-based **simulation** of the PyxisOS desktop environment. It demonstrates the PyxisOS desktop experience and exposes its system concepts through a working browser environment while the native operating system — including the Lunar Core microkernel — continues development separately.
@@ -104,7 +106,7 @@ npm test           # unit + integration tests
 npm run typecheck
 ```
 
-The production build is static (relative asset paths), so `dist/` can be hosted on any static file host. The `CI` workflow (`.github/workflows/ci.yml`) runs typecheck, tests and build on every push and pull request, and deploys `main` to GitHub Pages at https://obstinix.github.io/PyxisOS-Web/ once Pages is enabled with **Settings → Pages → Source: GitHub Actions**. After the first load the desktop works offline; fonts are bundled locally and the app makes no network requests.
+The production build is static (relative asset paths), so `dist/` can be hosted on any static file host. The `CI` workflow (`.github/workflows/ci.yml`) runs typecheck, tests and build on every push and pull request, and deploys `main` to GitHub Pages at https://obstinix.github.io/PyxisOS-Web/ (repository setting: **Settings → Pages → Source: GitHub Actions**). After the first load the desktop works offline; fonts are bundled locally and the app makes no network requests.
 
 Supported browsers: current Chrome, Edge, Firefox and Safari. The JS heap metric is only available in Chromium-based browsers.
 
