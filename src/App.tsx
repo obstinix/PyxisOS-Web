@@ -11,8 +11,23 @@ export function App() {
 
   useEffect(() => applySettingsToDocument(settings), [settings]);
 
+  // Keep the time-based wallpaper's time of day current.
   useEffect(() => {
-    void runtime.boot({ pace: 70 });
+    if (settings.wallpaper !== 'daycycle') return;
+    const id = setInterval(() => applySettingsToDocument(settingsStore.get()), 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [settings.wallpaper]);
+
+  useEffect(() => {
+    // A replay requested from the Boot Lab runs the full-length sequence once.
+    let replay = false;
+    try {
+      replay = sessionStorage.getItem('pyxis.replayBoot') === '1';
+      sessionStorage.removeItem('pyxis.replayBoot');
+    } catch {
+      replay = false;
+    }
+    void runtime.boot({ pace: replay ? 220 : 70 });
     const save = () => void runtime.saveNow();
     const onHide = () => document.visibilityState === 'hidden' && save();
     window.addEventListener('pagehide', save);

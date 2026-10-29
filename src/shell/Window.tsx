@@ -3,6 +3,8 @@ import { WindowState, wm, Bounds } from '../core/windows';
 import { getApp } from '../core/apps';
 import { events } from '../core/events';
 import { AppGlyph, Icon } from './icons';
+import { WORKSPACE_COUNT } from '../core/windows';
+import { openContextMenu, MenuEntry } from './ui';
 import { APP_COMPONENTS } from '../apps';
 
 type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -54,7 +56,7 @@ const AppContent = memo(
 /** Below this workspace width every window is presented maximised. */
 export const COMPACT_WIDTH = 700;
 
-export function Window({ win, focused, compact }: { win: WindowState; focused: boolean; compact: boolean }) {
+export function Window({ win, focused, compact, hidden = false }: { win: WindowState; focused: boolean; compact: boolean; hidden?: boolean }) {
   const maximized = win.maximized || compact;
   const ref = useRef<HTMLElement>(null);
   const meta = getApp(win.appId)!;
@@ -143,6 +145,15 @@ export function Window({ win, focused, compact }: { win: WindowState; focused: b
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') {
+        // Keyboard access to the window menu when the window frame itself has focus.
+        if (e.target === ref.current) {
+          e.preventDefault();
+          const r = ref.current!.getBoundingClientRect();
+          windowMenu(r.left + 12, r.top + 36);
+        }
+        return;
+      }
       if (e.altKey && e.shiftKey && !e.ctrlKey) {
         const vp = wm.state.viewport;
         const map: Record<string, () => void> = {
@@ -165,13 +176,38 @@ export function Window({ win, focused, compact }: { win: WindowState; focused: b
   // (e.g. opened from the terminal or dock) so typing reaches it.
   useEffect(() => {
     const el = ref.current;
-    if (!focused || win.minimized || !el || el.contains(document.activeElement)) return;
+    if (!focused || win.minimized || hidden || !el || el.contains(document.activeElement)) return;
     const target =
       el.querySelector<HTMLElement>('[data-autofocus]:not([disabled])') ??
       el.querySelector<HTMLElement>('.window-body textarea, .window-body input:not([type="hidden"]):not([type="file"]):not([disabled])') ??
       el;
     target.focus({ preventScroll: true });
-  }, [focused, win.minimized]);
+  }, [focused, win.minimized, hidden]);
+
+  const windowMenu = (x: number, y: number) => {
+    const vp = wm.state.viewport;
+    const items: MenuEntry[] = [
+      { label: 'Minimize', icon: <Icon.minimize size={14} />, shortcut: 'Alt+M', onSelect: () => wm.minimize(win.id) },
+      ...(compact
+        ? []
+        : [
+            { label: maximized ? 'Restore' : 'Maximize', icon: maximized ? <Icon.restore size={14} /> : <Icon.maximize size={14} />, onSelect: () => wm.toggleMaximize(win.id) },
+            { label: 'Snap left', icon: <Icon.arrowLeft size={14} />, shortcut: 'Alt+Shift+←', onSelect: () => wm.setBounds(win.id, { x: 0, y: 0, w: vp.w / 2, h: vp.h }) },
+            { label: 'Snap right', icon: <Icon.arrowRight size={14} />, shortcut: 'Alt+Shift+→', onSelect: () => wm.setBounds(win.id, { x: vp.w / 2, y: 0, w: vp.w / 2, h: vp.h }) },
+          ]),
+      'separator',
+      ...Array.from({ length: WORKSPACE_COUNT }, (_, i) => ({
+        label: `Move to workspace ${i + 1}`,
+        icon: <Icon.layers size={14} />,
+        shortcut: `Alt+Shift+${i + 1}`,
+        disabled: win.workspace === i,
+        onSelect: () => wm.moveToWorkspace(win.id, i),
+      })),
+      'separator',
+      { label: 'Close', icon: <Icon.close size={14} />, shortcut: 'Alt+W', danger: true, onSelect: () => wm.close(win.id) },
+    ];
+    openContextMenu(x, y, items);
+  };
 
   const { x, y, w, h } = win.bounds;
   const style = maximized
@@ -181,11 +217,11 @@ export function Window({ win, focused, compact }: { win: WindowState; focused: b
   return (
     <section
       ref={ref}
-      className={`window${focused ? ' focused' : ''}${maximized ? ' maximized' : ''}${win.minimized ? ' minimized' : ''}`}
+      className={`window${focused ? ' focused' : ''}${maximized ? ' maximized' : ''}${win.minimized ? ' minimized' : ''}${hidden ? ' ws-hidden' : ''}`}
       style={style}
       role="dialog"
       aria-label={win.title}
-      aria-hidden={win.minimized || undefined}
+      aria-hidden={win.minimized || hidden || undefined}
       data-app={win.appId}
       data-window-id={win.id}
       tabIndex={-1}
@@ -200,6 +236,10 @@ export function Window({ win, focused, compact }: { win: WindowState; focused: b
         onPointerUp={end}
         onPointerCancel={end}
         onDoubleClick={(e) => !compact && !(e.target as HTMLElement).closest('button') && wm.toggleMaximize(win.id)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          windowMenu(e.clientX, e.clientY);
+        }}
       >
         <span className="window-icon">
           <AppGlyph id={win.appId} size={15} />

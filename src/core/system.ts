@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, sanitizeSettings, settingsStore } from './settings';
 import { Store } from './store';
 import { wm } from './windows';
 import { APPS } from './apps';
+import { decode, encode, loadStatus, LoadStatus, persistedSpecs, PersistedSpec, setLateLoader } from './persisted';
 import { BUILD_DATE, BUILD_NAME, CHANNEL, CODENAME, LICENSE, REPO_URL, SIM_KERNEL, VERSION } from './version';
 
 export interface BootStage {
@@ -13,6 +14,20 @@ export interface BootStage {
   status: 'pending' | 'running' | 'done' | 'warn' | 'failed';
   detail?: string;
   durationMs?: number;
+  /** Stage narrates a concept rather than performing real work. */
+  simulated?: boolean;
+}
+
+export interface BootHook {
+  id: string;
+  label: string;
+  run: () => Promise<string | void>;
+}
+
+/** Extra boot stages registered by the composition root (services, diagnostics). */
+const bootHooks: BootHook[] = [];
+export function registerBootHook(hook: BootHook): void {
+  if (!bootHooks.some((h) => h.id === hook.id)) bootHooks.push(hook);
 }
 
 export type Phase = 'boot' | 'login' | 'desktop' | 'shutdown' | 'failed';
@@ -53,11 +68,12 @@ class Runtime {
   private unsubscribers: (() => void)[] = [];
   private booted = false;
   /**
-   * True once stored data has been loaded. Until then nothing may be written:
-   * saving earlier (e.g. when the tab is hidden mid-boot) would overwrite the
-   * user's files and settings with defaults.
+   * True once every stored record has been loaded. Until then nothing may be
+   * written: saving earlier (e.g. when the tab is hidden mid-boot) would
+   * overwrite the user's data with defaults.
    */
   private loaded = false;
+  private pace = 0;
 
   uptimeMs(): number {
     return Date.now() - this.bootedAt;
@@ -75,9 +91,11 @@ class Runtime {
     if (this.booted) return;
     this.booted = true;
     this.bootedAt = Date.now();
-    const pace = opts.pace ?? 0;
+    this.pace = opts.pace ?? 0;
     const plan: [string, string, () => Promise<string | void>][] = [
+      ['firmware', 'Firmware and bootloader handoff', async () => 'sim:Page load stands in for firmware → bootloader → kernel handoff'],
       ['runtime', 'Initialising Lunar-Pyxis runtime', async () => this.checkRuntime()],
+      ['hardware', 'Discovering browser-reported hardware', async () => discoverHardware()],
       ['storage', 'Opening persistent storage', async () => {
         this.storage = opts.storage ?? (await openStorage());
         this.persistence.set((p) => ({ ...p, backend: this.storage.kind }));
@@ -108,7 +126,9 @@ class Runtime {
         const { files, dirs } = this.fs.counts();
         return `${warn ? 'warn:' : ''}${note} (${files} files, ${dirs} dirs)`;
       }],
+      ['state', 'Restoring user state', async () => this.loadPersisted()],
       ['apps', 'Loading application registry', async () => `${APPS.length} applications registered`],
+      ...bootHooks.map((h): [string, string, () => Promise<string | void>] => [h.id, h.label, h.run]),
       ['meta', 'Recording session metadata', async () => {
         const meta = ((await this.storage.get<{ bootCount: number }>(KEYS.meta)) ?? { bootCount: 0 });
         this.bootCount = (meta.bootCount ?? 0) + 1;
@@ -122,20 +142,21 @@ class Runtime {
       }],
       ['desktop', 'Starting desktop environment', async () => 'Ready'],
     ];
-    this.stages.set(plan.map(([id, label]) => ({ id, label, status: 'pending' })));
+    this.stages.set(plan.map(([id, label]) => ({ id, label, status: 'pending', simulated: id === 'firmware' })));
     for (const [id, label, run] of plan) {
       const t0 = performance.now();
       this.setStage(id, { status: 'running' });
       try {
         const result = (await run()) ?? '';
         const warn = result.startsWith('warn:');
-        const detail = warn ? result.slice(5) : result;
-        this.setStage(id, { status: warn ? 'warn' : 'done', detail, durationMs: performance.now() - t0 });
-        events.log('boot', `${label}: ${detail || 'ok'}`, warn ? 'warn' : 'info');
+        const simulated = result.startsWith('sim:');
+        const detail = warn || simulated ? result.slice(result.indexOf(':') + 1) : result;
+        this.setStage(id, { status: warn ? 'warn' : 'done', detail, durationMs: performance.now() - t0, simulated });
+        events.log('boot', `${label}: ${detail || 'ok'}`, warn ? 'warn' : 'info', { simulated, data: { stage: id } });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.setStage(id, { status: 'failed', detail: message, durationMs: performance.now() - t0 });
-        events.log('boot', `${label} failed: ${message}`, 'error');
+        events.log('boot', `${label} failed: ${message}`, 'error', { data: { stage: id } });
         if (id === 'storage' || id === 'vfs' || id === 'settings') {
           // Recover with volatile defaults rather than leaving the user stuck.
           this.storage = new MemoryStore();
@@ -151,10 +172,46 @@ class Runtime {
           return;
         }
       }
-      if (pace) await new Promise((r) => setTimeout(r, pace));
+      if (this.pace) await new Promise((r) => setTimeout(r, this.pace));
     }
     events.log('boot', `Boot complete in ${Math.round(this.uptimeMs())} ms`, 'success');
     this.phase.set('login');
+  }
+
+  /** Skip the remaining boot pacing delays (stages still run). */
+  skipBootPacing(): void {
+    this.pace = 0;
+  }
+
+  /** Load every registered persisted store, backing up data that is replaced. */
+  private async loadPersisted(): Promise<string> {
+    const specs = persistedSpecs();
+    const statuses: LoadStatus[] = [];
+    for (const spec of specs) statuses.push(await this.loadSpec(spec));
+    setLateLoader((spec) => void this.loadSpec(spec).then((st) => loadStatus.set((l) => [...l, st])));
+    loadStatus.set(statuses);
+    const bad = statuses.filter((st) => st.outcome === 'invalid' || st.outcome === 'newer');
+    const migrated = statuses.filter((st) => st.outcome === 'migrated').length;
+    const note = `${specs.length} stores${migrated ? `, ${migrated} migrated` : ''}`;
+    return bad.length ? `warn:${note}; ${bad.map((b) => `${b.key}: ${b.detail}`).join('; ')}` : note;
+  }
+
+  private async loadSpec(spec: PersistedSpec<unknown>): Promise<LoadStatus> {
+    let raw: unknown;
+    try {
+      raw = await this.storage.get(spec.key);
+    } catch (e) {
+      return { key: spec.key, outcome: 'invalid', detail: `Read failed: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    const { value, status, backup } = decode(spec, raw);
+    if (backup && raw !== undefined) {
+      // Keep the original record so a migration never silently destroys data.
+      await this.storage.set(`${spec.key}.backup`, { savedAt: Date.now(), raw }).catch(() => undefined);
+    }
+    spec.store.set(value);
+    this.unsubscribers.push(spec.store.subscribe(() => this.scheduleSave()));
+    if (status.outcome !== 'loaded' && status.outcome !== 'defaults') events.log('storage', `${spec.key}: ${status.detail}`, 'warn');
+    return status;
   }
 
   private async checkRuntime(): Promise<string> {
@@ -166,12 +223,11 @@ class Runtime {
   }
 
   private attachPersistence(): void {
-    this.unsubscribers.forEach((u) => u());
-    this.unsubscribers = [
+    this.unsubscribers.push(
       this.fs.changed.subscribe(() => this.scheduleSave()),
       settingsStore.subscribe(() => this.scheduleSave()),
       wm.store.subscribe(() => this.scheduleSave(1200)),
-    ];
+    );
   }
 
   scheduleSave(delay = 350): void {
@@ -191,6 +247,7 @@ class Runtime {
       if (this.phase.get() === 'desktop') {
         await this.storage.set(KEYS.session, settingsStore.get().restoreSession ? wm.snapshot() : []);
       }
+      if (this.booted) for (const spec of persistedSpecs()) await this.storage.set(spec.key, encode(spec));
       this.persistence.set((p) => ({ ...p, lastSaveAt: Date.now(), lastError: null, saves: p.saves + 1, pending: false }));
       return true;
     } catch (err) {
@@ -259,6 +316,8 @@ class Runtime {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.booted = false;
     this.loaded = false;
+    setLateLoader(null);
+    for (const spec of persistedSpecs()) spec.store.set(spec.defaults());
     this.fs = new VirtualFS();
     this.fsInstance.set(this.fs);
     this.storage = new MemoryStore();
@@ -266,6 +325,14 @@ class Runtime {
     this.stages.set([]);
     wm.closeAll();
   }
+}
+
+function discoverHardware(): string {
+  const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { deviceMemory?: number }) : undefined;
+  const cores = nav?.hardwareConcurrency;
+  const mem = nav?.deviceMemory;
+  const scr = typeof screen !== 'undefined' ? `${screen.width}×${screen.height} display` : 'display size unavailable';
+  return [cores ? `${cores} logical CPUs` : 'CPU count unavailable', mem ? `~${mem} GiB memory` : 'memory size unavailable', scr].join(' · ');
 }
 
 export function systemFiles(): Record<string, string> {

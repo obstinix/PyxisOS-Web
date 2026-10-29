@@ -18,6 +18,8 @@ export const LIMITATIONS = [
   'The terminal executes only built-in psh commands — never host shell commands.',
   'Hardware values are limited to what the browser exposes; other values are simulated.',
   'Astral Intelligence is a local rule-based assistant, not a language model.',
+  'Simulated services, processes, consensus and Aegis policy model PyxisOS; they do not control the host.',
+  'Pyxis Browser uses your browser engine in sandboxed frames; sites that forbid embedding open in a real tab.',
 ];
 
 const STATUS_DOT = { pass: 'ok', warn: 'warn', fail: 'err', skip: 'muted' } as const;

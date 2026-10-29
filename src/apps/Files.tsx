@@ -9,6 +9,7 @@ import { Entry, MAX_FILE_BYTES } from '../core/vfs';
 import { formatBytes } from '../terminal/commands';
 import { Icon } from '../shell/icons';
 import { EmptyState, MenuEntry, confirmDialog, openContextMenu, promptDialog } from '../shell/ui';
+import { deleteFromTrash, emptyTrash, inTrash, moveToTrash, restoreFromTrash, TRASH_DIR, trashIndex, trashItems } from '../core/trash';
 
 /** Clipboard shared by all Files windows. */
 const clipboard = new Store<{ mode: 'copy' | 'cut'; paths: string[] } | null>(null);
@@ -21,7 +22,10 @@ const PLACES = [
   { label: 'Downloads', path: `${HOME}/Downloads`, icon: <Icon.folder size={15} /> },
   { label: 'System', path: '/system', icon: <Icon.storage size={15} /> },
   { label: 'tmp', path: '/tmp', icon: <Icon.folder size={15} /> },
+  { label: 'Trash', path: TRASH_DIR, icon: <Icon.trash size={15} /> },
 ];
+
+type SortKey = 'name' | 'size' | 'mtime';
 
 const TEXT_EXT = new Set(['txt', 'md', 'json', 'js', 'ts', 'tsx', 'css', 'html', 'csv', 'log', 'sh', 'py', 'yml', 'yaml', 'toml', 'xml', 'ini', '']);
 
@@ -44,12 +48,22 @@ export function FilesApp({ win }: AppProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(fs.isFile(initial) ? [initial] : []));
   const [query, setQuery] = useState('');
   const [searchContent, setSearchContent] = useState(false);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
+  const [undo, setUndo] = useState<string[]>([]);
+  const trash = useStore(trashIndex);
   const listRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const anchor = useRef<string | null>(null);
 
   // Follow launch arguments when an existing window is asked to show a path.
   useEffect(() => {
+    // Search hand-off from the command palette or assistant.
+    if (typeof win.props.search === 'string') {
+      setCwd(HOME);
+      setSearchContent(true);
+      setQuery(win.props.search);
+      return;
+    }
     const p = win.props.path;
     if (typeof p !== 'string' || !fs.exists(p)) return;
     navigate(fs.isDir(p) ? p : dirname(p));
@@ -75,8 +89,17 @@ export function FilesApp({ win }: AppProps) {
   try {
     entries = query.trim() ? fs.search(query.trim(), cwd, { content: searchContent }) : fs.isDir(cwd) ? fs.list(cwd) : [];
   } catch (e) {
-    listError = errMsg(e);
+    listError = cwd === TRASH_DIR ? null : errMsg(e);
   }
+  if (!query.trim()) {
+    entries = [...entries].sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      const d = sort.key === 'name' ? a.name.localeCompare(b.name, undefined, { numeric: true }) : (a[sort.key] as number) - (b[sort.key] as number);
+      return d * sort.dir;
+    });
+  }
+  const trashView = cwd === TRASH_DIR;
+  const trashRecord = (path: string) => trash.find((r) => `${TRASH_DIR}/${r.name}` === path);
   const existingSelection = [...selected].filter((p) => fs.exists(p));
   const single = existingSelection.length === 1 ? fs.stat(existingSelection[0]) : null;
   const readonlyDir = fs.isReadonly(cwd);
@@ -162,17 +185,40 @@ export function FilesApp({ win }: AppProps) {
     });
   };
 
+  /** Move to Trash (recoverable). Items already in the Trash, or outside /home, are deleted permanently after confirmation. */
   const remove = async (paths: string[]) => {
     if (!paths.length) return;
     const label = paths.length === 1 ? `“${basename(paths[0])}”` : `${paths.length} items`;
-    const ok = await confirmDialog(`Delete ${label}?`, {
-      message: 'Deleted items are removed from the virtual filesystem. This cannot be undone.',
-      confirmLabel: 'Delete',
-      danger: true,
-    });
-    if (!ok) return;
-    for (const p of paths) guard(`Could not delete ${basename(p)}`, () => fs.remove(p, { recursive: true }));
+    const permanent = paths.filter((p) => inTrash(p) || !p.startsWith(`${HOME}/`));
+    if (permanent.length) {
+      const ok = await confirmDialog(`Permanently delete ${permanent.length === paths.length ? label : `${permanent.length} item(s)`}?`, {
+        message: inTrash(permanent[0]) ? 'Items deleted from the Trash cannot be restored.' : 'Items outside your home folder do not go to the Trash and cannot be restored.',
+        confirmLabel: 'Delete permanently',
+        danger: true,
+      });
+      if (!ok) return;
+      for (const p of permanent) guard(`Could not delete ${basename(p)}`, () => (inTrash(p) ? deleteFromTrash(fs, basename(p)) : fs.remove(p, { recursive: true })));
+    }
+    const trashed: string[] = [];
+    for (const p of paths.filter((x) => !permanent.includes(x))) guard(`Could not move ${basename(p)} to Trash`, () => trashed.push(moveToTrash(fs, p).name));
+    if (trashed.length) setUndo(trashed);
     setSelected(new Set());
+  };
+
+  const restore = (names: string[]) => {
+    const restored: string[] = [];
+    for (const n of names) guard(`Could not restore ${n}`, () => restored.push(restoreFromTrash(fs, n)));
+    if (restored.length) notifications.notify('Restored from Trash', restored.map((r) => displayPath(r)).join(', '), 'success', 'files');
+    setUndo([]);
+    setSelected(new Set());
+  };
+
+  const empty = async () => {
+    const n = trashItems(fs).length || (fs.isDir(TRASH_DIR) ? fs.list(TRASH_DIR).length : 0);
+    if (!n) return;
+    if (await confirmDialog(`Empty Trash (${n} item${n === 1 ? '' : 's'})?`, { message: 'Everything in the Trash is permanently deleted from the virtual filesystem.', confirmLabel: 'Empty Trash', danger: true })) {
+      guard('Could not empty Trash', () => emptyTrash(fs));
+    }
   };
 
   const paste = () => {
@@ -263,9 +309,25 @@ export function FilesApp({ win }: AppProps) {
       { label: 'Rename…', icon: <Icon.rename size={14} />, shortcut: 'F2', disabled: ro || paths.length !== 1, onSelect: () => void rename(e) },
       ...(e.type === 'file' ? [{ label: 'Export to device', icon: <Icon.download size={14} />, onSelect: () => exportFile(e) }] : []),
       'separator',
-      { label: paths.length > 1 ? `Delete ${paths.length} items` : 'Delete', icon: <Icon.trash size={14} />, shortcut: 'Del', danger: true, disabled: ro, onSelect: () => void remove(paths) },
+      ...(paths.every((p) => inTrash(p) && dirname(p) === TRASH_DIR)
+        ? [{ label: paths.length > 1 ? `Restore ${paths.length} items` : 'Restore', icon: <Icon.undo size={14} />, onSelect: () => restore(paths.map((p) => basename(p))) }]
+        : []),
+      {
+        label: inTrash(e.path) || !e.path.startsWith(`${HOME}/`) ? (paths.length > 1 ? `Delete ${paths.length} items permanently` : 'Delete permanently') : paths.length > 1 ? `Move ${paths.length} items to Trash` : 'Move to Trash',
+        icon: <Icon.trash size={14} />,
+        shortcut: 'Del',
+        danger: true,
+        disabled: ro,
+        onSelect: () => void remove(paths),
+      },
     ];
-    openContextMenu(x, y, items);
+    // Inside the Trash only restore and permanent deletion make sense (renaming would orphan the index).
+    const trashOnly = paths.every((p) => inTrash(p));
+    openContextMenu(
+      x,
+      y,
+      trashOnly ? items.filter((it) => it === 'separator' || ['Open', 'Restore', 'Delete permanently'].some((l) => it.label.startsWith(l))) : items,
+    );
   };
 
   const backgroundMenu = (x: number, y: number) => {
@@ -282,6 +344,7 @@ export function FilesApp({ win }: AppProps) {
         onSelect: paste,
       },
       { label: 'Import from device…', icon: <Icon.upload size={14} />, disabled: readonlyDir, onSelect: () => importRef.current?.click() },
+      ...(trashView ? ['separator' as const, { label: 'Empty Trash…', icon: <Icon.trash size={14} />, danger: true, onSelect: () => void empty() }] : []),
     ]);
   };
 
@@ -383,6 +446,15 @@ export function FilesApp({ win }: AppProps) {
           </button>
           <input ref={importRef} type="file" multiple hidden onChange={(e) => void importFiles(e.target.files)} />
         </div>
+        {trashView && (
+          <div className="banner small row gap-2">
+            <span>Items here can be restored to their original folder. Right-click an item to restore it.</span>
+            <span className="toolbar-spacer" />
+            <button className="btn small danger" onClick={() => void empty()} disabled={!entries.length}>
+              Empty Trash
+            </button>
+          </div>
+        )}
         <div className="files-body">
           <div
             className="file-list"
@@ -400,14 +472,24 @@ export function FilesApp({ win }: AppProps) {
             onClick={(e) => e.target === e.currentTarget && setSelected(new Set())}
           >
             <div className="file-row head" role="row">
-              <span role="columnheader">Name</span>
-              <span role="columnheader">Size</span>
-              <span role="columnheader">Modified</span>
+              {(
+                [
+                  ['name', 'Name'],
+                  ['size', 'Size'],
+                  ['mtime', 'Modified'],
+                ] as [SortKey, string][]
+              ).map(([key, label]) => (
+                <span key={key} role="columnheader" aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+                  <button className="th-sort" onClick={() => setSort((s) => ({ key, dir: s.key === key ? ((-s.dir) as 1 | -1) : 1 }))} title={`Sort by ${label.toLowerCase()}`}>
+                    {label} {sort.key === key ? (sort.dir === 1 ? '▲' : '▼') : ''}
+                  </button>
+                </span>
+              ))}
             </div>
             {listError && <EmptyState title="Cannot open this location">{listError}</EmptyState>}
             {!listError && entries.length === 0 && (
               <EmptyState icon={<Icon.folder size={26} />} title={query ? 'No matches' : 'This folder is empty'}>
-                {query ? `Nothing in ${displayPath(cwd)} matches “${query}”.` : readonlyDir ? 'This location is read-only.' : 'Right-click to create a file or folder.'}
+                {query ? `Nothing in ${displayPath(cwd)} matches “${query}”.` : trashView ? 'Deleted items appear here until you empty the Trash.' : readonlyDir ? 'This location is read-only.' : 'Right-click to create a file or folder.'}
               </EmptyState>
             )}
             {entries.map((e) => {
@@ -430,6 +512,7 @@ export function FilesApp({ win }: AppProps) {
                   <span className="file-name" role="gridcell">
                     {e.type === 'dir' ? <Icon.folder size={16} className="fi-dir" /> : <Icon.fileText size={16} className="fi-file" />}
                     <span className="truncate">{query ? displayPath(e.path) : e.name}</span>
+                    {trashView && trashRecord(e.path) && <span className="muted small truncate"> from {displayPath(dirname(trashRecord(e.path)!.original))}</span>}
                     {e.readonly && <span className="ro-tag" title="Read-only">ro</span>}
                   </span>
                   <span className="mono muted" role="gridcell">
@@ -505,6 +588,14 @@ export function FilesApp({ win }: AppProps) {
             </span>
           )}
           {readonlyDir && <span className="muted">Read-only location</span>}
+          {undo.length > 0 && (
+            <span>
+              Moved {undo.length} item{undo.length === 1 ? '' : 's'} to Trash ·{' '}
+              <button className="linklike" onClick={() => restore(undo)}>
+                Undo
+              </button>
+            </span>
+          )}
         </div>
       </section>
     </div>

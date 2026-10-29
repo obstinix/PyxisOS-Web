@@ -20,13 +20,18 @@ export interface WindowState {
   /** Arbitrary launch arguments, e.g. `{ path }` for the editor. */
   props: Record<string, unknown>;
   openedAt: number;
+  /** Virtual workspace (0-based) the window belongs to. */
+  workspace: number;
 }
 
 export interface WindowManagerState {
   windows: WindowState[];
   focusedId: string | null;
   viewport: { w: number; h: number };
+  activeWorkspace: number;
 }
+
+export const WORKSPACE_COUNT = 4;
 
 /** Pixels of a window title bar that must stay reachable inside the viewport. */
 const GRAB_MARGIN = 48;
@@ -43,7 +48,8 @@ export function clampBounds(b: Bounds, viewport: { w: number; h: number }, min: 
 let seq = 0;
 
 export class WindowManager {
-  readonly store = new Store<WindowManagerState>({ windows: [], focusedId: null, viewport: { w: 1280, h: 720 } });
+  readonly store = new Store<WindowManagerState>({ windows: [], focusedId: null, viewport: { w: 1280, h: 720 }, activeWorkspace: 0 });
+  private openListeners = new Set<(win: WindowState) => void>();
   private zTop = 10;
   /** Optional per-window guards; returning false cancels a close (e.g. unsaved changes). */
   private closeGuards = new Map<string, () => boolean>();
@@ -54,6 +60,17 @@ export class WindowManager {
 
   get windows(): WindowState[] {
     return this.state.windows;
+  }
+
+  /** Windows on the active workspace. */
+  get visibleWindows(): WindowState[] {
+    const ws = this.state.activeWorkspace;
+    return this.windows.filter((w) => w.workspace === ws);
+  }
+
+  onOpen(fn: (win: WindowState) => void): () => void {
+    this.openListeners.add(fn);
+    return () => this.openListeners.delete(fn);
   }
 
   setViewport(w: number, h: number): void {
@@ -81,13 +98,14 @@ export class WindowManager {
     if (meta.singleton) {
       const existing = this.windows.find((w) => w.appId === appId);
       if (existing) {
+        this.openListeners.forEach((l) => l(existing));
         if (Object.keys(props).length) this.update(existing.id, (w) => ({ ...w, props: { ...w.props, ...props } }));
         this.focus(existing.id);
         return this.get(existing.id)!;
       }
     }
     const { viewport } = this.state;
-    const n = this.windows.length % 8;
+    const n = this.visibleWindows.length % 8;
     const w = Math.min(meta.defaultSize.w, viewport.w - 24);
     const h = Math.min(meta.defaultSize.h, viewport.h - 24);
     const bounds = clampBounds(
@@ -110,9 +128,11 @@ export class WindowManager {
       maximized: false,
       props,
       openedAt: Date.now(),
+      workspace: this.state.activeWorkspace,
     };
     this.store.set((s) => ({ ...s, windows: [...s.windows, win], focusedId: win.id }));
     events.log('wm', `Opened ${meta.name}`);
+    this.openListeners.forEach((l) => l(win));
     return win;
   }
 
@@ -130,7 +150,7 @@ export class WindowManager {
     this.closeGuards.delete(id);
     this.store.set((s) => {
       const windows = s.windows.filter((w) => w.id !== id);
-      return { ...s, windows, focusedId: s.focusedId === id ? topVisible(windows) : s.focusedId };
+      return { ...s, windows, focusedId: s.focusedId === id ? topVisible(windows, s.activeWorkspace) : s.focusedId };
     });
     events.log('wm', `Closed ${win.title}`);
     return true;
@@ -138,21 +158,38 @@ export class WindowManager {
 
   closeAll(): void {
     this.closeGuards.clear();
-    this.store.set((s) => ({ ...s, windows: [], focusedId: null }));
+    this.store.set((s) => ({ ...s, windows: [], focusedId: null, activeWorkspace: 0 }));
   }
 
   focus(id: string): void {
     const win = this.get(id);
     if (!win) return;
-    if (this.state.focusedId === id && !win.minimized && win.z === this.zTop) return;
+    if (this.state.focusedId === id && !win.minimized && win.z === this.zTop && win.workspace === this.state.activeWorkspace) return;
     const z = ++this.zTop;
     this.update(id, (w) => ({ ...w, z, minimized: false }));
-    this.store.set((s) => ({ ...s, focusedId: id }));
+    // Focusing a window on another workspace switches to that workspace.
+    this.store.set((s) => ({ ...s, focusedId: id, activeWorkspace: win.workspace }));
   }
 
   minimize(id: string): void {
     this.update(id, (w) => ({ ...w, minimized: true }));
-    this.store.set((s) => ({ ...s, focusedId: s.focusedId === id ? topVisible(s.windows) : s.focusedId }));
+    this.store.set((s) => ({ ...s, focusedId: s.focusedId === id ? topVisible(s.windows, s.activeWorkspace) : s.focusedId }));
+  }
+
+  switchWorkspace(index: number): void {
+    if (!Number.isInteger(index) || index < 0 || index >= WORKSPACE_COUNT) return;
+    if (index === this.state.activeWorkspace) return;
+    this.store.set((s) => ({ ...s, activeWorkspace: index, focusedId: topVisible(s.windows, index) }));
+    events.log('wm', `Switched to workspace ${index + 1}`);
+  }
+
+  /** Move a window to another workspace, keeping its bounds and state. */
+  moveToWorkspace(id: string, index: number): void {
+    const win = this.get(id);
+    if (!win || index < 0 || index >= WORKSPACE_COUNT || win.workspace === index) return;
+    this.update(id, (w) => ({ ...w, workspace: index }));
+    this.store.set((s) => ({ ...s, focusedId: s.focusedId === id ? topVisible(s.windows, s.activeWorkspace) : s.focusedId }));
+    events.log('wm', `Moved ${win.title} to workspace ${index + 1}`);
   }
 
   /** Taskbar behaviour: focus if hidden or behind, minimise if already focused. */
@@ -181,9 +218,9 @@ export class WindowManager {
 
   /** Cycle focus between visible windows (Alt+` style). */
   cycle(): void {
-    const visible = this.windows.filter((w) => !w.minimized).sort((a, b) => a.z - b.z);
+    const visible = this.visibleWindows.filter((w) => !w.minimized).sort((a, b) => a.z - b.z);
     if (visible.length < 2) {
-      const only = this.windows[0];
+      const only = this.visibleWindows[0];
       if (only) this.focus(only.id);
       return;
     }
@@ -191,11 +228,11 @@ export class WindowManager {
   }
 
   /** Serializable layout used for session restore. */
-  snapshot(): { appId: AppId; bounds: Bounds; maximized: boolean; props: Record<string, unknown> }[] {
+  snapshot(): { appId: AppId; bounds: Bounds; maximized: boolean; minimized: boolean; workspace: number; props: Record<string, unknown> }[] {
     return [...this.windows]
       .sort((a, b) => a.z - b.z)
       .filter((w) => APPS.some((a) => a.id === w.appId))
-      .map((w) => ({ appId: w.appId, bounds: w.bounds, maximized: w.maximized, props: w.props }));
+      .map((w) => ({ appId: w.appId, bounds: w.bounds, maximized: w.maximized, minimized: w.minimized, workspace: w.workspace, props: w.props }));
   }
 
   restore(layout: unknown): number {
@@ -203,14 +240,19 @@ export class WindowManager {
     let restored = 0;
     for (const item of layout.slice(0, 12)) {
       if (!item || typeof item !== 'object') continue;
-      const { appId, bounds, maximized, props } = item as Record<string, unknown>;
+      const { appId, bounds, maximized, minimized, workspace, props } = item as Record<string, unknown>;
       if (typeof appId !== 'string' || !getApp(appId)) continue;
       const safeProps = props && typeof props === 'object' ? (props as Record<string, unknown>) : {};
       const win = this.open(appId as AppId, safeProps);
       if (isBounds(bounds)) this.setBounds(win.id, bounds);
       if (maximized === true) this.update(win.id, (w) => ({ ...w, maximized: true }));
+      if (typeof workspace === 'number' && Number.isInteger(workspace) && workspace >= 0 && workspace < WORKSPACE_COUNT) {
+        this.update(win.id, (w) => ({ ...w, workspace }));
+      }
+      if (minimized === true) this.update(win.id, (w) => ({ ...w, minimized: true }));
       restored++;
     }
+    this.store.set((s) => ({ ...s, focusedId: topVisible(s.windows, s.activeWorkspace) }));
     return restored;
   }
 }
@@ -221,8 +263,8 @@ function isBounds(b: unknown): b is Bounds {
   return ['x', 'y', 'w', 'h'].every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]));
 }
 
-function topVisible(windows: WindowState[]): string | null {
-  const visible = windows.filter((w) => !w.minimized);
+function topVisible(windows: WindowState[], workspace: number): string | null {
+  const visible = windows.filter((w) => !w.minimized && w.workspace === workspace);
   if (!visible.length) return null;
   return visible.reduce((a, b) => (b.z > a.z ? b : a)).id;
 }

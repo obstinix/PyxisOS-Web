@@ -98,6 +98,92 @@ const APP_GLYPHS: Record<AppId, ReactNode> = {
       <circle cx="12" cy="8" r="0.9" {...AF} />
     </>
   ),
+  browser: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M4 12h16M12 4c2.4 2.2 3.5 5 3.5 8s-1.1 5.8-3.5 8c-2.4-2.2-3.5-5-3.5-8s1.1-5.8 3.5-8z" />
+      <circle cx="17.6" cy="6.4" r="1.6" {...AF} />
+    </>
+  ),
+  doctor: (
+    <>
+      <path d="M12 20s-7-4.2-7-9.5A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.5C19 15.8 12 20 12 20z" />
+      <path d="M8 12.5h2.2l1.3-2.2 1.8 4 1.2-1.8H16" {...A} />
+    </>
+  ),
+  services: (
+    <>
+      <rect x="4" y="4.5" width="16" height="5" rx="1.2" />
+      <rect x="4" y="14.5" width="16" height="5" rx="1.2" />
+      <circle cx="7.5" cy="7" r="1" {...AF} />
+      <circle cx="7.5" cy="17" r="1" fill="currentColor" stroke="none" />
+      <path d="M12 9.5v5" />
+    </>
+  ),
+  processes: (
+    <>
+      <rect x="9" y="3.5" width="6" height="4" rx="1" />
+      <rect x="3.5" y="16.5" width="6" height="4" rx="1" />
+      <rect x="14.5" y="16.5" width="6" height="4" rx="1" {...A} />
+      <path d="M12 7.5v4.5M6.5 16.5V12h11v4.5" />
+    </>
+  ),
+  config: (
+    <>
+      <path d="M6 3.5h8l4 4v13H6z" />
+      <path d="M10 11l-2 2 2 2M14 11l2 2-2 2" {...A} />
+    </>
+  ),
+  sysinfo: (
+    <>
+      <rect x="3.5" y="5" width="17" height="11" rx="1.6" />
+      <path d="M9 19.5h6M12 16v3.5" />
+      <path d="M7 9h5M7 12h8" {...A} />
+    </>
+  ),
+  consensus: (
+    <>
+      <circle cx="12" cy="5.5" r="2" {...A} />
+      <circle cx="5" cy="17" r="2" />
+      <circle cx="19" cy="17" r="2" />
+      <path d="M10.9 7.3l-4.8 7.9M13.1 7.3l4.8 7.9M7 17h10" />
+    </>
+  ),
+  aegis: (
+    <>
+      <path d="M12 3.5l7 2.6v5.4c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6.1z" />
+      <path d="M9 12l2.2 2.2L15.5 10" {...A} />
+    </>
+  ),
+  bootlab: (
+    <>
+      <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
+      <path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3" />
+      <path d="M10 12h4" {...A} />
+    </>
+  ),
+  correlation: (
+    <>
+      <path d="M4 18h16" />
+      <circle cx="7" cy="12" r="1.8" />
+      <circle cx="12" cy="8" r="1.8" {...A} />
+      <circle cx="17" cy="12.5" r="1.8" />
+      <path d="M8.4 10.9l2.2-1.7M13.5 9.2l2.1 2.1" />
+    </>
+  ),
+  activity: (
+    <>
+      <path d="M12 3.5l1.4 4 4 1.4-4 1.4-1.4 4-1.4-4-4-1.4 4-1.4z" />
+      <path d="M5 18.5h8M5 15.5h5" />
+      <path d="M15.5 17l1.6 1.6 2.9-3" {...A} />
+    </>
+  ),
+  selftest: (
+    <>
+      <path d="M9 3.5h6M10 3.5v5.2L5.4 17.4A2 2 0 0 0 7.2 20.5h9.6a2 2 0 0 0 1.8-3.1L14 8.7V3.5" />
+      <path d="M7.5 15h9" {...A} />
+    </>
+  ),
 };
 
 export function AppGlyph({ id, size = 22 }: { id: AppId; size?: number }) {
@@ -343,6 +429,98 @@ export const Icon = {
   chevronDown: (p: IconProps) => (
     <Svg {...p}>
       <path d="M7 10l5 5 5-5" />
+    </Svg>
+  ),
+  star: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M12 4l2.4 5 5.3.6-4 3.6 1.1 5.3L12 15.8l-4.8 2.7 1.1-5.3-4-3.6 5.3-.6z" />
+    </Svg>
+  ),
+  starFilled: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M12 4l2.4 5 5.3.6-4 3.6 1.1 5.3L12 15.8l-4.8 2.7 1.1-5.3-4-3.6 5.3-.6z" fill="currentColor" />
+    </Svg>
+  ),
+  sliders: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M5 7h14M5 12h14M5 17h14" />
+      <circle cx="9" cy="7" r="1.8" fill="var(--surface-1)" />
+      <circle cx="15" cy="12" r="1.8" fill="var(--surface-1)" />
+      <circle cx="8" cy="17" r="1.8" fill="var(--surface-1)" />
+    </Svg>
+  ),
+  volume: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M5 9.5h3l4-3.5v12l-4-3.5H5z" />
+      <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M17.8 7.2a6.8 6.8 0 0 1 0 9.6" />
+    </Svg>
+  ),
+  volumeOff: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M5 9.5h3l4-3.5v12l-4-3.5H5z" />
+      <path d="M16 10l4 4M20 10l-4 4" />
+    </Svg>
+  ),
+  battery: (p: IconProps) => (
+    <Svg {...p}>
+      <rect x="3.5" y="8" width="15" height="8" rx="1.6" />
+      <path d="M20.5 11v2" />
+    </Svg>
+  ),
+  moon: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z" />
+    </Svg>
+  ),
+  sun: (p: IconProps) => (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M6 18l1.4-1.4M16.6 7.4 18 6" />
+    </Svg>
+  ),
+  command: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M9 9V7a2 2 0 1 0-2 2h10a2 2 0 1 0-2-2v10a2 2 0 1 0 2-2H7a2 2 0 1 0 2 2z" />
+    </Svg>
+  ),
+  layers: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M12 4l8 4-8 4-8-4z" />
+      <path d="M4 12l8 4 8-4M4 16l8 4 8-4" />
+    </Svg>
+  ),
+  stop: (p: IconProps) => (
+    <Svg {...p}>
+      <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
+    </Svg>
+  ),
+  help: (p: IconProps) => (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M9.8 9.6a2.3 2.3 0 0 1 4.4.9c0 1.6-2.2 2-2.2 3.4" />
+      <circle cx="12" cy="16.6" r="0.6" fill="currentColor" />
+    </Svg>
+  ),
+  bookmark: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M7 4.5h10v15l-5-3.5-5 3.5z" />
+    </Svg>
+  ),
+  bookmarkFilled: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M7 4.5h10v15l-5-3.5-5 3.5z" fill="currentColor" />
+    </Svg>
+  ),
+  history: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9" />
+      <path d="M4.5 4.5V9H9M12 8v4.5l3 1.8" />
+    </Svg>
+  ),
+  undo: (p: IconProps) => (
+    <Svg {...p}>
+      <path d="M9 7.5L5 11.5l4 4" />
+      <path d="M5 11.5h9a5 5 0 0 1 0 10h-2" />
     </Svg>
   ),
   external: (p: IconProps) => (

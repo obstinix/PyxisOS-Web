@@ -1,7 +1,12 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { AppProps } from './types';
 import { useStore } from '../core/store';
-import { ACCENTS, AccentId, DEFAULT_SETTINGS, SCALES, Settings, WALLPAPERS, WallpaperId, settingsStore, updateSettings } from '../core/settings';
+import { ACCENTS, AccentId, DEFAULT_SETTINGS, DENSITIES, DensityId, FONTS, FontId, OPACITIES, RADII, RadiusId, SCALES, Settings, WALLPAPERS, WallpaperId, settingsStore, updateSettings } from '../core/settings';
+import { clearRecents } from '../core/userstate';
+import { clearHistory } from '../core/browser';
+import { activity } from '../core/intents';
+import { clearAudit } from '../core/aegis';
+import { wm } from '../core/windows';
 import { notifications } from '../core/notifications';
 import { runtime } from '../core/system';
 import { events } from '../core/events';
@@ -10,12 +15,33 @@ import { sanitizeSettings } from '../core/settings';
 import { confirmDialog } from '../shell/ui';
 import { Icon } from '../shell/icons';
 
-type Section = 'appearance' | 'desktop' | 'notifications' | 'session';
+type Section = 'appearance' | 'desktop' | 'accessibility' | 'keyboard' | 'notifications' | 'privacy' | 'storage' | 'session' | 'help';
 const SECTIONS: { id: Section; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'desktop', label: 'Desktop & dock' },
+  { id: 'accessibility', label: 'Accessibility' },
+  { id: 'keyboard', label: 'Keyboard shortcuts' },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'privacy', label: 'Privacy' },
+  { id: 'storage', label: 'Storage' },
   { id: 'session', label: 'Session & data' },
+  { id: 'help', label: 'Help & recovery' },
+];
+
+export const SHORTCUTS: [string, string][] = [
+  ['Ctrl+K / Ctrl+Shift+P', 'Command palette'],
+  ['Alt+Space', 'Application launcher'],
+  ['Alt+1 … Alt+4', 'Switch workspace'],
+  ['Alt+Shift+1 … Alt+Shift+4', 'Move focused window to workspace'],
+  ['Alt+T / Alt+E / Alt+,', 'Terminal / Files / Settings'],
+  ['Alt+W / Alt+M', 'Close / minimise focused window'],
+  ['Alt+`', 'Cycle windows'],
+  ['Alt+Shift+← / → / ↑ / ↓', 'Snap left / right, maximise, minimise'],
+  ['Shift+F10 or Menu key', 'Context menu (window frame, dock item)'],
+  ['Esc / Enter (during boot)', 'Skip boot pacing'],
+  ['Browser: Ctrl+L, Ctrl+R, Ctrl+D', 'Address bar, reload, bookmark'],
+  ['Browser: Alt+← / Alt+→, Alt+N, Alt+Q', 'Back / forward, new tab, close tab'],
+  ['Terminal: ↑ ↓, Tab, Ctrl+L, Ctrl+C', 'History, completion, clear, cancel line'],
 ];
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -169,6 +195,21 @@ export function SettingsApp({ win }: AppProps) {
                 ))}
               </div>
             </Row>
+            <Row label="Typeface">
+              <Choice label="Typeface" value={s.font} options={(Object.keys(FONTS) as FontId[]).map((v) => ({ value: v, label: FONTS[v] }))} onChange={(font) => set({ font }, 'Typeface')} />
+            </Row>
+            <Row label="Corner radius">
+              <Choice label="Corner radius" value={s.radius} options={(Object.keys(RADII) as RadiusId[]).map((v) => ({ value: v, label: RADII[v] }))} onChange={(radius) => set({ radius }, 'Corner radius')} />
+            </Row>
+            <Row label="Density" hint="Spacing of panels and lists">
+              <Choice label="Density" value={s.density} options={(Object.keys(DENSITIES) as DensityId[]).map((v) => ({ value: v, label: DENSITIES[v] }))} onChange={(density) => set({ density }, 'Density')} />
+            </Row>
+            <Row label="Window opacity">
+              <Choice label="Window opacity" value={s.windowOpacity} options={OPACITIES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }))} onChange={(windowOpacity) => set({ windowOpacity }, 'Window opacity')} />
+            </Row>
+            <Row label="Background blur" hint="Blurs what is behind translucent windows and bars (costs some performance)">
+              <Toggle label="Background blur" checked={s.blur} onChange={(blur) => set({ blur }, 'Blur')} />
+            </Row>
             <Row label="Display scale" hint="Scales text and interface elements">
               <Choice label="Display scale" value={s.scale} options={SCALES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }))} onChange={(scale) => set({ scale }, 'Display scale')} />
             </Row>
@@ -285,6 +326,132 @@ export function SettingsApp({ win }: AppProps) {
           </>
         )}
 
+        {section === 'accessibility' && (
+          <>
+            <h2>Accessibility</h2>
+            <Row label="High contrast" hint="Stronger borders and text, thicker focus rings">
+              <Toggle label="High contrast" checked={s.highContrast} onChange={(highContrast) => set({ highContrast }, 'High contrast')} />
+            </Row>
+            <Row label="Motion" hint="Reduced turns off window animations and animated wallpapers">
+              <Choice
+                label="Motion"
+                value={s.motion}
+                options={[
+                  { value: 'system', label: 'Follow system' },
+                  { value: 'reduced', label: 'Reduced' },
+                  { value: 'full', label: 'Full' },
+                ]}
+                onChange={(motion) => set({ motion }, 'Motion preference')}
+              />
+            </Row>
+            <Row label="Text size" hint="Scales all text and controls">
+              <Choice label="Text size" value={s.scale} options={SCALES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }))} onChange={(scale) => set({ scale }, 'Display scale')} />
+            </Row>
+            <Row label="Notification duration" hint="How long toasts stay on screen">
+              <Choice
+                label="Notification duration"
+                value={s.notificationDurationMs}
+                options={[
+                  { value: 4500, label: 'Normal' },
+                  { value: 9000, label: 'Long' },
+                  { value: 15000, label: 'Longest' },
+                ]}
+                onChange={(notificationDurationMs) => set({ notificationDurationMs }, 'Notification duration')}
+              />
+            </Row>
+            <p className="muted small">
+              Every control is reachable with Tab; dialogs keep focus inside until closed and return it afterwards. Use Shift+F10 on a focused window or dock item for its context menu.
+            </p>
+          </>
+        )}
+
+        {section === 'keyboard' && (
+          <>
+            <h2>Keyboard shortcuts</h2>
+            <table className="table kbd-table">
+              <tbody>
+                {SHORTCUTS.map(([k, v]) => (
+                  <tr key={k}>
+                    <td>
+                      <kbd>{k}</kbd>
+                    </td>
+                    <td>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="muted small">Some browser shortcuts (Ctrl+T, Ctrl+W) cannot be overridden by a web page, so PyxisOS uses Alt-based alternatives.</p>
+          </>
+        )}
+
+        {section === 'privacy' && (
+          <>
+            <h2>Privacy</h2>
+            <p className="note">
+              PyxisOS-Web has no analytics, telemetry or accounts. Data stays in this browser's storage for this site. The only network requests are the pages and search APIs (DuckDuckGo, Wikipedia) you load in Pyxis Browser — those are made by your browser directly to those sites.
+            </p>
+            <Row label="Recently used apps">
+              <button className="btn small" onClick={() => (clearRecents(), notifications.notify('Recent apps cleared', undefined, 'success', 'settings'))}>
+                Clear
+              </button>
+            </Row>
+            <Row label="Browser history" hint="Pyxis Browser history only — not your real browser's">
+              <button className="btn small" onClick={() => (clearHistory(), notifications.notify('Browser history cleared', undefined, 'success', 'settings'))}>
+                Clear
+              </button>
+            </Row>
+            <Row label="Assistant activity log">
+              <button className="btn small" onClick={() => (activity.set([]), notifications.notify('Assistant activity cleared', undefined, 'success', 'settings'))}>
+                Clear
+              </button>
+            </Row>
+            <Row label="Aegis audit log">
+              <button className="btn small" onClick={() => (clearAudit(), notifications.notify('Audit log cleared', undefined, 'success', 'settings'))}>
+                Clear
+              </button>
+            </Row>
+          </>
+        )}
+
+        {section === 'storage' && <StorageSection />}
+
+        {section === 'help' && (
+          <>
+            <h2>Help &amp; recovery</h2>
+            <Row label="First-run setup">
+              <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('pyxis:onboarding'))}>
+                Replay setup
+              </button>
+            </Row>
+            <Row label="Guided demo" hint="A short walkthrough of the main features">
+              <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('pyxis:tour'))}>
+                Start guided demo
+              </button>
+            </Row>
+            <Row label="Boot sequence" hint="Reload and replay the full boot">
+              <button
+                className="btn small"
+                onClick={async () => {
+                  if (!(await confirmDialog('Replay the boot sequence?', { message: 'Your work is saved first; the page reloads.', confirmLabel: 'Restart' }))) return;
+                  try {
+                    sessionStorage.setItem('pyxis.replayBoot', '1');
+                  } catch {
+                    // replay still happens at the normal pace
+                  }
+                  await runtime.restart();
+                }}
+              >
+                Replay boot
+              </button>
+            </Row>
+            <Row label="Self-test & recovery" hint="Run self-tests and reset specific data safely">
+              <button className="btn small" onClick={() => wm.open('selftest')}>
+                Open
+              </button>
+            </Row>
+          </>
+        )}
+
         {section === 'session' && (
           <>
             <h2>Session &amp; data</h2>
@@ -337,5 +504,36 @@ export function SettingsApp({ win }: AppProps) {
         )}
       </div>
     </div>
+  );
+}
+
+function StorageSection() {
+  const [est, setEst] = useState<{ usage: number; quota: number } | null | 'unavailable'>(null);
+  useEffect(() => {
+    if (!navigator.storage?.estimate) {
+      setEst('unavailable');
+      return;
+    }
+    navigator.storage
+      .estimate()
+      .then((e) => setEst({ usage: e.usage ?? 0, quota: e.quota ?? 0 }))
+      .catch(() => setEst('unavailable'));
+  }, []);
+  const vfsBytes = runtime.fs.totalBytes();
+  const mib = (n: number) => `${(n / 1048576).toFixed(2)} MiB`;
+  return (
+    <>
+      <h2>Storage</h2>
+      <Row label="Backend" hint="Where PyxisOS-Web keeps its data">
+        <span className="mono">{runtime.storage.kind}</span>
+      </Row>
+      <Row label="Virtual disk" hint="Files in the PyxisOS virtual filesystem (25 MiB quota)">
+        <span className="mono">{mib(vfsBytes)} of 25 MiB</span>
+      </Row>
+      <Row label="Site storage" hint="Reported by your browser for this site (includes caches)">
+        <span className="mono">{est === null ? 'reading…' : est === 'unavailable' ? 'not reported by this browser' : `${mib(est.usage)} of ${mib(est.quota)}`}</span>
+      </Row>
+      <p className="muted small">This is browser storage, not your computer's disk. Clearing site data for this site erases it — export a profile backup from Session &amp; data first.</p>
+    </>
   );
 }

@@ -181,6 +181,8 @@ export function DialogHost() {
   const inputRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const previousFocus = useRef<Element | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(boxRef, !!dialog);
 
   useEffect(() => {
     if (!dialog) return;
@@ -214,6 +216,7 @@ export function DialogHost() {
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && finish(dialog.kind === 'confirm' ? false : null)}>
       <div
+        ref={boxRef}
         className="dialog"
         role="dialog"
         aria-modal="true"
@@ -226,7 +229,7 @@ export function DialogHost() {
         }}
       >
         <h2 id="dialog-title">{dialog.title}</h2>
-        {dialog.message && <p className="dialog-message">{dialog.message}</p>}
+        {dialog.message && <p className="dialog-message" style={{ whiteSpace: 'pre-line' }}>{dialog.message}</p>}
         {dialog.kind === 'prompt' && (
           <>
             <input
@@ -282,4 +285,70 @@ export function EmptyState({ icon, title, children }: { icon?: ReactNode; title:
       {children && <span>{children}</span>}
     </div>
   );
+}
+
+// ---------------------------------------------------------------- focus & files
+
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keep Tab / Shift+Tab inside `ref` while mounted and restore focus to the
+ * previously focused element on unmount (for modal dialogs and overlays).
+ */
+export function useFocusTrap(ref: React.RefObject<HTMLElement>, active = true): void {
+  useEffect(() => {
+    if (!active) return;
+    const el = ref.current;
+    const previous = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !el) return;
+      const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.offsetParent !== null || n === document.activeElement);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !el.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !el.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
+    };
+  }, [ref, active]);
+}
+
+/** Offer text to the user as a downloaded file (generated locally, nothing is uploaded). */
+export function downloadText(filename: string, text: string, type = 'text/plain'): void {
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function timeAgo(t: number, now = Date.now()): string {
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(t).toLocaleDateString();
 }

@@ -8,7 +8,7 @@ import { runDiagnostics, listChecks } from '../src/core/diagnostics';
 import { askAstral, recommendations } from '../src/core/astral';
 import { HOME } from '../src/core/path';
 import { events } from '../src/core/events';
-import { getServices } from '../src/core/services';
+import { getServices, startEnabledServices } from '../src/core/services';
 
 describe('application registry', () => {
   it('has unique ids and sane sizes', () => {
@@ -309,11 +309,14 @@ describe('services and astral', () => {
   it('reports unavailable native services honestly', () => {
     const services = getServices();
     expect(services.find((s) => s.id === 'lunar-core')!.kind).toBe('UNAVAILABLE');
-    expect(services.find((s) => s.id === 'astral-consensus')!.kind).toBe('NOT IMPLEMENTED');
+    expect(services.find((s) => s.id === 'astral-consensusd')!.kind).toBe('SIMULATED');
+    expect(services.filter((s) => s.kind === 'LIVE').every((s) => s.status !== 'muted')).toBe(true);
   });
 
   it('answers from live state and labels the rule used', async () => {
     await runtime.boot({ storage: new MemoryStore() });
+    expect((await askAstral('give me a system status')).rule).toBe('daemon-stopped');
+    startEnabledServices();
     const status = await askAstral('give me a system status');
     expect(status.rule).toBe('status');
     expect(status.text.join(' ')).toContain('files');
@@ -327,7 +330,10 @@ describe('services and astral', () => {
     expect(ai.text.join(' ')).toContain('do not use a language model');
 
     expect((await askAstral('what is lunar core')).rule).toBe('kernel');
-    expect((await askAstral('run diagnostics again')).rule).toBe('run-diagnostics');
+    const proposal = await askAstral('run diagnostics again');
+    expect(proposal.rule).toBe('intent: run diagnostics / doctor');
+    expect(proposal.proposal?.capability).toBe('diagnostics.run');
+    expect(proposal.proposal?.outcome).toBeUndefined();
     expect((await askAstral('blorp')).rule).toBe('fallback');
   });
 

@@ -6,9 +6,13 @@ import { APPS, AppId, getApp } from '../core/apps';
 import { runtime } from '../core/system';
 import { runDiagnostics, CheckStatus } from '../core/diagnostics';
 import { events } from '../core/events';
+
 import { wm } from '../core/windows';
 import { readStaticInfo } from '../core/metrics';
-import { getServices } from '../core/services';
+import { getDef, getServices, restartService, SERVICE_DEFS, setServiceEnabled, startService, stopService } from '../core/services';
+import { endProcess, listProcesses } from '../core/processes';
+import { formatEvents } from '../core/events';
+import { request } from '../core/aegis';
 import { settingsStore } from '../core/settings';
 import { BUILD_DATE, BUILD_NAME, CHANNEL, CODENAME, LICENSE, OS_NAME, REPO_URL, SIM_KERNEL, VERSION } from '../core/version';
 
@@ -744,6 +748,138 @@ const edit: CommandSpec = {
   },
 };
 
+
+// ------------------------------------------------------------------ system tools
+
+const sysinfo: CommandSpec = {
+  name: 'sysinfo',
+  summary: 'Project, build, runtime and browser summary',
+  usage: 'sysinfo',
+  group: 'PyxisOS',
+  run(ctx) {
+    const info = readStaticInfo();
+    const rows: [string, string][] = [
+      ['OS', `${OS_NAME} ${VERSION} (${CODENAME} // ${CHANNEL})`],
+      ['Build', `${BUILD_NAME} ${BUILD_DATE}`],
+      ['Kernel', `${SIM_KERNEL.name} ${SIM_KERNEL.release} [SIMULATED]`],
+      ['Uptime', `${formatDuration(runtime.uptimeMs())} [LIVE]`],
+      ['Windows', `${wm.windows.length} open on ${new Set(wm.windows.map((w) => w.workspace)).size || 1} workspace(s)`],
+      ['Storage', `${runtime.storage.kind}, ${formatBytes(ctx.fs.totalBytes())} used [LIVE]`],
+      ['CPUs', info.logicalCores ? `${info.logicalCores} logical [LIVE]` : 'UNAVAILABLE'],
+      ['Display', `${info.screen} @${info.pixelRatio}x [LIVE]`],
+      ['Services', `${getServices().filter((x) => x.status === 'ok').length}/${getServices().length} healthy`],
+    ];
+    ctx.out(rows.map(([k, v]) => `${pad(k, 10)}${v}`).join('\n'));
+  },
+};
+
+const doctor: CommandSpec = {
+  name: 'doctor',
+  summary: 'Run diagnostics (same as pyxis doctor)',
+  usage: 'doctor',
+  group: 'PyxisOS',
+  run: (ctx) => pyxisDoctor(ctx),
+};
+
+const services: CommandSpec = {
+  name: 'services',
+  summary: 'List or control services (start|stop|restart|enable|disable <id>)',
+  usage: 'services [list | start|stop|restart|enable|disable <id>]',
+  group: 'PyxisOS',
+  async run(ctx) {
+    const [verb = 'list', id] = ctx.args;
+    if (verb === 'list' || verb === 'status') {
+      ctx.out(`${pad('SERVICE', 20)}${pad('TYPE', 12)}STATE`, 'muted');
+      for (const svc of getServices()) ctx.out(`${pad(svc.id, 20)}${pad(svc.kind, 12)}${svc.state}`, svc.status === 'err' ? 'err' : svc.status);
+      return 0;
+    }
+    if (!['start', 'stop', 'restart', 'enable', 'disable'].includes(verb)) {
+      ctx.err(`unknown action '${verb}'\nusage: ${this.usage}`);
+      return 2;
+    }
+    const def = id ? getDef(id) : undefined;
+    if (!def) {
+      ctx.err(`unknown service '${id ?? ''}' (controllable: ${SERVICE_DEFS.filter((d) => d.controllable).map((d) => d.id).join(', ')})`);
+      return 1;
+    }
+    await request('system', 'services.control', `terminal: services ${verb} ${def.id}`);
+    try {
+      if (verb === 'start') ctx.out(`started: ${startService(def.id, { cascade: true, actor: 'terminal' }).join(', ') || 'already running'}`, 'ok');
+      else if (verb === 'stop') ctx.out(`stopped: ${stopService(def.id, { cascade: true, actor: 'terminal' }).join(', ') || 'already stopped'}`, 'ok');
+      else if (verb === 'restart') {
+        restartService(def.id, { actor: 'terminal' });
+        ctx.out(`restarted ${def.id}`, 'ok');
+      } else {
+        setServiceEnabled(def.id, verb === 'enable', 'terminal');
+        ctx.out(`${def.id} ${verb}d at startup`, 'ok');
+      }
+      ctx.out('(simulated service — no host process is affected)', 'muted');
+      return 0;
+    } catch (e) {
+      ctx.err((e as Error).message);
+      return 1;
+    }
+  },
+};
+
+const ps: CommandSpec = {
+  name: 'ps',
+  summary: 'List demo processes (resource figures are simulated)',
+  usage: 'ps',
+  group: 'PyxisOS',
+  run(ctx) {
+    ctx.out(`${pad('PID', 7)}${pad('PPID', 7)}${pad('STATE', 12)}${pad('CPU%', 7)}${pad('MEM', 10)}NAME`, 'muted');
+    for (const p of listProcesses()) {
+      ctx.out(`${pad(String(p.pid), 7)}${pad(String(p.ppid), 7)}${pad(p.state, 12)}${pad(p.cpu.toFixed(1), 7)}${pad(`${(p.memKiB / 1024).toFixed(1)}M`, 10)}${p.name}${p.kind === 'SIMULATED' ? ' [sim]' : ''}`);
+    }
+    ctx.out('CPU/MEM are simulated estimates; no host processes are listed.', 'muted');
+  },
+};
+
+const kill: CommandSpec = {
+  name: 'kill',
+  summary: 'End a demo process by PID (closes its window or stops a simulated service)',
+  usage: 'kill <pid>',
+  group: 'PyxisOS',
+  run(ctx) {
+    if (!needArgs(ctx, 1, this.usage)) return 1;
+    const pid = Number(ctx.args[0]);
+    if (!Number.isInteger(pid)) {
+      ctx.err(`invalid pid '${ctx.args[0]}'`);
+      return 1;
+    }
+    const r = endProcess(pid);
+    if (r.ok) ctx.out(r.message, 'ok');
+    else ctx.err(r.message);
+    return r.ok ? 0 : 1;
+  },
+};
+
+const journal: CommandSpec = {
+  name: 'journal',
+  summary: 'Show system journal entries',
+  usage: 'journal [-n count] [-p warn|error] [-u source]',
+  group: 'PyxisOS',
+  run(ctx) {
+    let n = 20;
+    let level = '';
+    let source = '';
+    const a = ctx.args;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] === '-n') n = Math.max(1, Math.min(500, Number(a[++i]) || 20));
+      else if (a[i] === '-p') level = a[++i] ?? '';
+      else if (a[i] === '-u') source = a[++i] ?? '';
+      else {
+        ctx.err(`unknown option '${a[i]}'\nusage: ${this.usage}`);
+        return 2;
+      }
+    }
+    const list = events.all.filter((e) => (!level || (level === 'warn' ? e.level === 'warn' || e.level === 'error' : e.level === level)) && (!source || e.source === source)).slice(-n);
+    if (!list.length) ctx.out('no matching entries', 'muted');
+    else ctx.out(formatEvents(list));
+  },
+};
+
 // ------------------------------------------------------------------ pyxis
 
 async function pyxisDoctor(ctx: CommandContext): Promise<number> {
@@ -874,6 +1010,8 @@ export function createRegistry(): CommandRegistry {
   [whoami, hostname, date, uptime, uname, neofetch, open].forEach((c) => reg.register(c));
   reg.register(edit, ['nano', 'vi']);
   reg.register(pyxis);
+  [sysinfo, doctor, services, journal, kill].forEach((c) => reg.register(c));
+  reg.register(ps, ['processes']);
   return reg;
 }
 

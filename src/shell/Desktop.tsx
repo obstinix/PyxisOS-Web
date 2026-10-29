@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSignal, useStore } from '../core/store';
-import { wm, WindowState } from '../core/windows';
-import { APPS, AppId, getApp } from '../core/apps';
+import { wm, WindowState, WORKSPACE_COUNT } from '../core/windows';
+import { AppId, getApp } from '../core/apps';
+import { toggleFavorite, userState } from '../core/userstate';
+import { setAskHandler } from '../core/aegis';
+import { setConfirmHandler } from '../core/actions';
+import { CAPABILITIES } from '../core/capabilities';
 import { runtime } from '../core/system';
 import { settingsStore } from '../core/settings';
 import { notifications } from '../core/notifications';
@@ -10,8 +14,11 @@ import { HOME, joinPath } from '../core/path';
 import { CODENAME, CHANNEL } from '../core/version';
 import { COMPACT_WIDTH, Window } from './Window';
 import { Launcher } from './Launcher';
+import { CommandPalette } from './Palette';
+import { BatteryIndicator, QuickSettings, WorkspaceSwitcher } from './Tray';
+import { Onboarding, Tour } from './Guide';
 import { AppTile, Icon, PyxisMark } from './icons';
-import { ContextMenuHost, DialogHost, MenuEntry, confirmDialog, openContextMenu, promptDialog, useNow } from './ui';
+import { ContextMenuHost, DialogHost, MenuEntry, confirmDialog, openContextMenu, promptDialog, timeAgo, useNow } from './ui';
 
 function formatClock(t: number, h24: boolean, seconds: boolean): string {
   return new Date(t).toLocaleTimeString([], {
@@ -74,24 +81,58 @@ function NetworkIndicator() {
 
 function NotificationPanel({ onClose }: { onClose: () => void }) {
   const list = useStore(notifications.history);
-  useEffect(() => {
-    notifications.markAllRead();
-  }, [list.length]);
+  const settings = useStore(settingsStore);
+  const [grouped, setGrouped] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'unread' | 'problems'>('all');
+  const now = useNow(30000);
+  const shown = list.filter((n) => (filter === 'unread' ? !n.read : filter === 'problems' ? n.level === 'warn' || n.level === 'error' : true));
+  const groups = grouped ? [...new Set(shown.map((n) => n.source))].map((src) => ({ src, items: shown.filter((n) => n.source === src) })) : [{ src: '', items: shown }];
+  const unread = list.filter((n) => !n.read).length;
   return (
-    <div className="panel notif-panel" role="dialog" aria-label="Notifications" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+    <div className="panel notif-panel" role="dialog" aria-label="Notification center" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <div className="panel-head">
-        <strong>Notifications</strong>
-        <button className="btn small ghost" onClick={() => notifications.clear()} disabled={!list.length}>
-          Clear all
-        </button>
+        <strong>Notifications{unread ? ` · ${unread} unread` : ''}</strong>
+        <span className="row gap-1">
+          <button className="btn small ghost" onClick={() => notifications.markAllRead()} disabled={!unread}>
+            Mark all read
+          </button>
+          <button className="btn small ghost" onClick={() => notifications.clear()} disabled={!list.length}>
+            Clear all
+          </button>
+        </span>
       </div>
+      <div className="notif-tools">
+        <div className="seg small" role="radiogroup" aria-label="Filter notifications">
+          {(['all', 'unread', 'problems'] as const).map((f) => (
+            <button key={f} role="radio" aria-checked={filter === f} className={filter === f ? 'active' : undefined} onClick={() => setFilter(f)}>
+              {f === 'all' ? 'All' : f === 'unread' ? 'Unread' : 'Warnings'}
+            </button>
+          ))}
+        </div>
+        <label className="check small">
+          <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> Group by app
+        </label>
+      </div>
+      {settings.dnd && <div className="notif-dnd">Do not disturb is on — notifications are kept here without toasts.</div>}
       <div className="notif-list">
-        {list.length === 0 && <div className="panel-empty">No notifications this session.</div>}
-        {list.map((n) => (
-          <div key={n.id} className={`notif notif-${n.level}`}>
-            <div className="notif-title">{n.title}</div>
-            {n.body && <div className="notif-body">{n.body}</div>}
-            <div className="notif-time mono">{new Date(n.time).toLocaleTimeString()}</div>
+        {shown.length === 0 && <div className="panel-empty">{list.length ? 'Nothing matches this filter.' : 'No notifications this session.'}</div>}
+        {groups.map((g) => (
+          <div key={g.src || 'all'} role="list" aria-label={g.src || 'Notifications'}>
+            {grouped && <div className="notif-group">{g.src}</div>}
+            {g.items.map((n) => (
+              <div key={n.id} role="listitem" className={`notif notif-${n.level}${n.read ? '' : ' unread'}`}>
+                <button className="notif-main" onClick={() => notifications.markRead(n.id, !n.read)} aria-label={`${n.title}${n.read ? '' : ', unread'} — toggle read`}>
+                  <span className="notif-title">{n.title}</span>
+                  {n.body && <span className="notif-body">{n.body}</span>}
+                  <span className="notif-time mono">
+                    {n.level.toUpperCase()} · {n.source} · {timeAgo(n.time, now)}
+                  </span>
+                </button>
+                <button className="wc" aria-label={`Dismiss ${n.title}`} onClick={() => notifications.dismiss(n.id)}>
+                  <Icon.close size={12} />
+                </button>
+              </div>
+            ))}
           </div>
         ))}
       </div>
@@ -155,9 +196,10 @@ function Toasts() {
 }
 
 function Dock({ windows, focusedId }: { windows: WindowState[]; focusedId: string | null }) {
-  const pinned = APPS.filter((a) => a.pinned).map((a) => a.id);
-  const running = [...new Set(windows.map((w) => w.appId))].filter((id) => !pinned.includes(id));
-  const ids: AppId[] = [...pinned, ...running];
+  const { favorites } = useStore(userState);
+  const running = [...new Set(windows.map((w) => w.appId))].filter((id) => !favorites.includes(id));
+  const ids: AppId[] = [...favorites, ...running];
+  const navRef = useRef<HTMLElement>(null);
 
   const activate = (id: AppId) => {
     const wins = windows.filter((w) => w.appId === id).sort((a, b) => b.z - a.z);
@@ -176,13 +218,19 @@ function Dock({ windows, focusedId }: { windows: WindowState[]; focusedId: strin
   const menu = (id: AppId, x: number, y: number) => {
     const meta = getApp(id)!;
     const wins = windows.filter((w) => w.appId === id);
+    const pinned = favorites.includes(id);
     const items: MenuEntry[] = [
-      ...wins.map((w) => ({ label: w.title, icon: <Icon.restore size={14} />, onSelect: () => wm.focus(w.id) })),
+      ...wins.map((w) => ({ label: `${w.title} — workspace ${w.workspace + 1}`, icon: <Icon.restore size={14} />, onSelect: () => wm.focus(w.id) })),
       ...(wins.length ? ['separator' as const] : []),
       {
         label: wins.length && meta.singleton ? 'Show window' : 'New window',
         icon: <Icon.plus size={14} />,
         onSelect: () => wm.open(id),
+      },
+      {
+        label: pinned ? 'Remove from dock' : 'Keep in dock',
+        icon: pinned ? <Icon.starFilled size={14} /> : <Icon.star size={14} />,
+        onSelect: () => toggleFavorite(id),
       },
       {
         label: wins.length > 1 ? `Close ${wins.length} windows` : 'Close',
@@ -195,8 +243,20 @@ function Dock({ windows, focusedId }: { windows: WindowState[]; focusedId: strin
     openContextMenu(x, y, items);
   };
 
+  // Roving focus: arrow keys move between dock items, Home/End jump.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    const items = [...(navRef.current?.querySelectorAll<HTMLButtonElement>('.dock-item') ?? [])];
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? Math.max(0, i - 1) : Math.min(items.length - 1, i + 1);
+    items[next]?.focus();
+  };
+
   return (
-    <nav className="dock" aria-label="Dock">
+    <nav className="dock" aria-label="Dock" ref={navRef} onKeyDown={onKeyDown}>
       <div className="dock-inner">
         {ids.map((id, i) => {
           const meta = getApp(id)!;
@@ -204,15 +264,23 @@ function Dock({ windows, focusedId }: { windows: WindowState[]; focusedId: strin
           const isFocused = windows.some((w) => w.appId === id && w.id === focusedId && !w.minimized);
           return (
             <span key={id} className="dock-slot">
-              {i === pinned.length && running.length > 0 && <span className="dock-sep" aria-hidden="true" />}
+              {i === favorites.length && running.length > 0 && <span className="dock-sep" aria-hidden="true" />}
               <button
                 className={`dock-item${count ? ' running' : ''}${isFocused ? ' focused' : ''}`}
-                aria-label={`${meta.name}${count ? `, ${count} open` : ''}`}
+                aria-label={`${meta.name}${count ? `, ${count} open` : ''}${isFocused ? ', active' : ''}`}
+                aria-haspopup="menu"
                 data-tip={meta.name}
                 onClick={() => activate(id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   menu(id, e.clientX, e.clientY);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+                    e.preventDefault();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    menu(id, r.left, r.top - 8);
+                  }
                 }}
               >
                 <AppTile id={id} size={40} />
@@ -259,12 +327,16 @@ function DesktopIcons() {
 }
 
 export function Desktop() {
-  const { windows, focusedId, viewport } = useStore(wm.store);
+  const { windows, focusedId, viewport, activeWorkspace } = useStore(wm.store);
   const compact = viewport.w < COMPACT_WIDTH;
   const settings = useStore(settingsStore);
   const unread = useStore(notifications.history).filter((n) => !n.read).length;
   const [launcher, setLauncher] = useState(false);
-  const [panel, setPanel] = useState<'notifications' | 'power' | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [panel, setPanel] = useState<'notifications' | 'power' | 'quick' | null>(null);
+  const user = useStore(userState);
+  const [onboarding, setOnboarding] = useState(!user.onboardingDone);
+  const [tour, setTour] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const focused = windows.find((w) => w.id === focusedId);
 
@@ -279,18 +351,63 @@ export function Desktop() {
     return () => ro.disconnect();
   }, [settings.dockPosition]);
 
+  // Permission prompts and confirmation of destructive actions use the desktop dialog.
+  useEffect(() => {
+    setAskHandler((subject, cap, reason) =>
+      confirmDialog(`Allow ${getApp(subject)?.name ?? subject} to ${CAPABILITIES[cap].label.toLowerCase()}?`, {
+        message: `${reason}\n\nAegis policy for this app is set to “ask”. This is an application-level permission inside PyxisOS-Web.`,
+        confirmLabel: 'Allow once',
+      }),
+    );
+    setConfirmHandler((title, message) => confirmDialog(`${title}?`, { message, confirmLabel: title, danger: true }));
+    const openTour = () => setTour(true);
+    const openOnboarding = () => setOnboarding(true);
+    const openLauncher = () => setLauncher(true);
+    const closeOverlays = () => {
+      setLauncher(false);
+      setPalette(false);
+    };
+    window.addEventListener('pyxis:close-overlays', closeOverlays);
+    window.addEventListener('pyxis:tour', openTour);
+    window.addEventListener('pyxis:onboarding', openOnboarding);
+    window.addEventListener('pyxis:launcher', openLauncher);
+    return () => {
+      window.removeEventListener('pyxis:tour', openTour);
+      window.removeEventListener('pyxis:onboarding', openOnboarding);
+      window.removeEventListener('pyxis:launcher', openLauncher);
+      window.removeEventListener('pyxis:close-overlays', closeOverlays);
+    };
+  }, []);
+
   // Global keyboard shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
-      if ((e.altKey && k === ' ') || (e.ctrlKey && !e.shiftKey && k === 'k')) {
+      if ((e.ctrlKey && !e.altKey && k === 'k') || (e.ctrlKey && e.shiftKey && k === 'p')) {
+        e.preventDefault();
+        setPalette((v) => !v);
+        setLauncher(false);
+        setPanel(null);
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && k === ' ') {
         e.preventDefault();
         setLauncher((v) => !v);
+        setPalette(false);
         setPanel(null);
         return;
       }
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
       const fid = wm.state.focusedId;
+      // Alt+1..4 switches workspace; Alt+Shift+1..4 moves the focused window there.
+      const digit = /^Digit([1-9])$/.exec(e.code);
+      if (digit && Number(digit[1]) <= WORKSPACE_COUNT) {
+        e.preventDefault();
+        const n = Number(digit[1]) - 1;
+        if (e.shiftKey && fid) wm.moveToWorkspace(fid, n);
+        else if (!e.shiftKey) wm.switchWorkspace(n);
+        return;
+      }
       const actions: Record<string, () => void> = {
         t: () => wm.open('terminal'),
         e: () => wm.open('files'),
@@ -369,11 +486,17 @@ export function Desktop() {
         },
       },
       { label: 'Change wallpaper…', icon: <Icon.grid size={14} />, onSelect: () => wm.open('settings', { section: 'appearance' }) },
+      { label: 'Command palette', icon: <Icon.command size={14} />, shortcut: 'Ctrl+K', onSelect: () => setPalette(true) },
+      {
+        label: 'Next workspace',
+        icon: <Icon.layers size={14} />,
+        onSelect: () => wm.switchWorkspace((wm.state.activeWorkspace + 1) % WORKSPACE_COUNT),
+      },
       {
         label: 'Minimize all windows',
         icon: <Icon.minimize size={14} />,
-        disabled: !windows.some((w) => !w.minimized),
-        onSelect: () => windows.forEach((w) => wm.minimize(w.id)),
+        disabled: !wm.visibleWindows.some((w) => !w.minimized),
+        onSelect: () => wm.visibleWindows.forEach((w) => wm.minimize(w.id)),
       },
       {
         label: 'Close all windows',
@@ -404,18 +527,30 @@ export function Desktop() {
               {CODENAME} <span className="brand-sep">//</span> {CHANNEL}
             </span>
           </button>
+          <WorkspaceSwitcher />
           <span className="topbar-focus" aria-live="polite">
             {focused && !focused.minimized ? focused.title : 'Desktop'}
           </span>
         </div>
         <div className="topbar-right">
-          <button className="topbar-search" onClick={() => setLauncher(true)} aria-label="Search">
+          <button className="topbar-search" onClick={() => setPalette(true)} aria-label="Search or run a command" title="Command palette (Ctrl+K)">
             <Icon.search size={14} />
-            <span>Search</span>
+            <span>Search or run…</span>
             <kbd>Ctrl K</kbd>
           </button>
           <StorageIndicator />
           <NetworkIndicator />
+          <BatteryIndicator />
+          <button
+            className="status-ind"
+            data-panel-toggle
+            aria-label="Quick settings"
+            aria-expanded={panel === 'quick'}
+            title="Quick settings"
+            onClick={() => setPanel((p) => (p === 'quick' ? null : 'quick'))}
+          >
+            <Icon.sliders size={15} />
+          </button>
           <button
             className="status-ind"
             data-panel-toggle
@@ -441,13 +576,24 @@ export function Desktop() {
       <main className="workspace" ref={workspaceRef} onContextMenu={desktopMenu}>
         <DesktopIcons />
         {windows.map((w) => (
-          <Window key={w.id} win={w} focused={w.id === focusedId} compact={compact} />
+          <Window key={w.id} win={w} focused={w.id === focusedId} compact={compact} hidden={w.workspace !== activeWorkspace} />
         ))}
       </main>
       <Dock windows={windows} focusedId={focusedId} />
       {panel === 'notifications' && <NotificationPanel onClose={() => setPanel(null)} />}
       {panel === 'power' && <PowerMenu onClose={() => setPanel(null)} />}
+      {panel === 'quick' && <QuickSettings onClose={() => setPanel(null)} onOpenSettings={() => wm.open('settings')} />}
       {launcher && <Launcher onClose={() => setLauncher(false)} />}
+      {palette && <CommandPalette onClose={() => setPalette(false)} />}
+      {tour && <Tour onExit={() => setTour(false)} />}
+      {onboarding && (
+        <Onboarding
+          onDone={(startTour) => {
+            setOnboarding(false);
+            if (startTour) setTour(true);
+          }}
+        />
+      )}
       <Toasts />
       <ContextMenuHost />
       <DialogHost />

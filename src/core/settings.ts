@@ -2,7 +2,10 @@ import { Store } from './store';
 
 export type ThemeMode = 'dark' | 'light';
 export type AccentId = 'crimson' | 'rose' | 'ember' | 'graphite';
-export type WallpaperId = 'eclipse' | 'orbit' | 'lattice' | 'void';
+export type WallpaperId = 'eclipse' | 'orbit' | 'lattice' | 'void' | 'dusk' | 'drift' | 'daycycle';
+export type FontId = 'plex' | 'system' | 'mono';
+export type RadiusId = 'sharp' | 'default' | 'round';
+export type DensityId = 'compact' | 'comfortable';
 export type DockPosition = 'bottom' | 'left' | 'right';
 export type MotionPref = 'system' | 'full' | 'reduced';
 
@@ -21,6 +24,17 @@ export interface Settings {
   restoreSession: boolean;
   fastBoot: boolean;
   displayName: string;
+  font: FontId;
+  radius: RadiusId;
+  density: DensityId;
+  /** Window background opacity (1 = opaque). */
+  windowOpacity: number;
+  blur: boolean;
+  highContrast: boolean;
+  /** Notification chime volume, 0–100 (0 = silent). */
+  soundVolume: number;
+  /** Do not disturb: notifications are recorded but no toasts or sounds. */
+  dnd: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,6 +52,14 @@ export const DEFAULT_SETTINGS: Settings = {
   restoreSession: true,
   fastBoot: false,
   displayName: 'Pyxis Operator',
+  font: 'plex',
+  radius: 'default',
+  density: 'comfortable',
+  windowOpacity: 1,
+  blur: false,
+  highContrast: false,
+  soundVolume: 0,
+  dnd: false,
 };
 
 export const ACCENTS: Record<AccentId, { label: string; dark: string; light: string; soft: string }> = {
@@ -52,7 +74,15 @@ export const WALLPAPERS: Record<WallpaperId, string> = {
   orbit: 'Orbit Lines',
   lattice: 'Lattice',
   void: 'Void',
+  dusk: 'Dusk Gradient',
+  drift: 'Drift (animated)',
+  daycycle: 'Day Cycle (time-based)',
 };
+
+export const FONTS: Record<FontId, string> = { plex: 'IBM Plex Sans', system: 'System UI', mono: 'IBM Plex Mono' };
+export const RADII: Record<RadiusId, string> = { sharp: 'Sharp', default: 'Default', round: 'Rounded' };
+export const DENSITIES: Record<DensityId, string> = { compact: 'Compact', comfortable: 'Comfortable' };
+export const OPACITIES = [1, 0.96, 0.92, 0.86];
 
 export const SCALES = [0.875, 1, 1.125, 1.25];
 
@@ -63,6 +93,10 @@ const ENUMS: Partial<Record<keyof Settings, readonly unknown[]>> = {
   dockPosition: ['bottom', 'left', 'right'],
   motion: ['system', 'full', 'reduced'],
   scale: SCALES,
+  font: Object.keys(FONTS),
+  radius: Object.keys(RADII),
+  density: Object.keys(DENSITIES),
+  windowOpacity: OPACITIES,
 };
 
 /** Merge untrusted persisted data with defaults, discarding invalid values. */
@@ -79,6 +113,10 @@ export function sanitizeSettings(raw: unknown): Settings {
     if (key === 'displayName') {
       const name = String(v).trim().slice(0, 40);
       if (name) out.displayName = name;
+      continue;
+    }
+    if (key === 'soundVolume') {
+      out.soundVolume = Math.round(Math.min(100, Math.max(0, Number(v) || 0)));
       continue;
     }
     if (key === 'notificationDurationMs') {
@@ -113,4 +151,20 @@ export function applySettingsToDocument(s: Settings, root: HTMLElement = documen
   root.style.setProperty('--accent-soft', accent.soft);
   root.style.setProperty('--ui-scale', String(s.scale));
   root.style.fontSize = `${14 * s.scale}px`;
+  root.dataset.font = s.font;
+  root.dataset.radius = s.radius;
+  root.dataset.density = s.density;
+  root.dataset.contrast = s.highContrast ? 'high' : 'normal';
+  root.dataset.blur = s.blur ? 'on' : 'off';
+  root.style.setProperty('--window-alpha', `${Math.round(s.windowOpacity * 100)}%`);
+  root.dataset.daypart = daypart(new Date());
+}
+
+/** Coarse time of day used by the time-based wallpaper. */
+export function daypart(d: Date): 'night' | 'dawn' | 'day' | 'dusk' {
+  const h = d.getHours();
+  if (h < 5 || h >= 21) return 'night';
+  if (h < 9) return 'dawn';
+  if (h < 17) return 'day';
+  return 'dusk';
 }

@@ -130,6 +130,18 @@ export class VirtualFS {
     this.changed.emit();
   }
 
+  /** Replace one generated sub-directory of /system (e.g. /system/config). */
+  installSystemSubdir(name: string, files: SystemFiles): void {
+    const sys = this.root.children.system;
+    if (!sys || sys.type !== 'dir') return;
+    const sub = dir(name);
+    for (const [fname, content] of Object.entries(files)) sub.children[fname] = file(fname, content);
+    const prev = sys.children[name];
+    if (prev && prev.type === 'dir' && JSON.stringify(Object.entries(prev.children).map(([k, v]) => [k, v.type === 'file' ? v.content : ''])) === JSON.stringify(Object.entries(files))) return;
+    sys.children[name] = sub;
+    this.changed.emit();
+  }
+
   // ---------------------------------------------------------------- lookup
 
   private lookup(path: string): VfsNode | undefined {

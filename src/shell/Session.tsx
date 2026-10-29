@@ -16,8 +16,18 @@ const STAGE_MARK: Record<string, string> = {
 
 export function BootScreen() {
   const stages = useStore(runtime.stages);
+  const [skipped, setSkipped] = useState(false);
   const done = stages.filter((s) => s.status !== 'pending' && s.status !== 'running').length;
   const pct = stages.length ? Math.round((done / stages.length) * 100) : 0;
+  const skip = () => {
+    runtime.skipBootPacing();
+    setSkipped(true);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => (e.key === 'Escape' || e.key === 'Enter') && skip();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   return (
     <div className="boot" role="status" aria-live="polite" aria-label="Starting PyxisOS">
       <div className="boot-inner">
@@ -35,13 +45,21 @@ export function BootScreen() {
           {stages.map((s) => (
             <li key={s.id} className={`boot-stage ${s.status}`}>
               <span className="boot-flag">[{STAGE_MARK[s.status]}]</span>
-              <span className="boot-label">{s.label}</span>
+              <span className="boot-label">
+                {s.label}
+                {s.simulated && <span className="boot-sim"> [SIM]</span>}
+              </span>
               {s.detail && <span className="boot-detail">— {s.detail}</span>}
               {s.durationMs !== undefined && <span className="boot-time">{s.durationMs.toFixed(1)}ms</span>}
             </li>
           ))}
         </ol>
-        <div className="boot-foot mono">{BUILD_NAME} · browser simulation · no native kernel is started</div>
+        <div className="boot-foot mono">
+          {BUILD_NAME} · browser simulation · no native kernel is started ·{' '}
+          <button className="linklike" onClick={skip} disabled={skipped}>
+            {skipped ? 'skipping…' : 'skip (Esc)'}
+          </button>
+        </div>
       </div>
     </div>
   );

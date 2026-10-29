@@ -9,6 +9,8 @@ import './styles/tokens.css';
 import './styles/base.css';
 import './styles/shell.css';
 import './styles/apps.css';
+import './styles/features.css';
+import './core/modules';
 import { App } from './App';
 import { RootErrorBoundary } from './shell/RootErrorBoundary';
 

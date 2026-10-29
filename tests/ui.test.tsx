@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import '../src/core/modules';
 import { App } from '../src/App';
 import { runtime } from '../src/core/system';
 import { wm } from '../src/core/windows';
@@ -27,6 +28,13 @@ async function bootToDesktop() {
     fireEvent.click(enter);
   });
   await screen.findByRole('dialog', { name: 'System Center' });
+  // First-run setup appears on a fresh profile; skip it like a returning user would.
+  const skip = screen.queryByRole('button', { name: 'Skip' });
+  if (skip) {
+    await act(async () => {
+      fireEvent.click(skip);
+    });
+  }
 }
 
 async function runInTerminal(input: HTMLElement, command: string) {
@@ -100,9 +108,9 @@ describe('desktop integration', () => {
   it('launcher searches and opens applications', async () => {
     await bootToDesktop();
     await act(async () => {
-      fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+      fireEvent.keyDown(window, { key: ' ', altKey: true });
     });
-    const search = await screen.findByLabelText('Search applications and files');
+    const search = await screen.findByLabelText('Search applications');
     await act(async () => {
       fireEvent.change(search, { target: { value: 'monitor' } });
     });
@@ -110,7 +118,43 @@ describe('desktop integration', () => {
       fireEvent.keyDown(search, { key: 'Enter' });
     });
     expect(await screen.findByRole('dialog', { name: 'System Monitor' })).toBeTruthy();
-    expect(screen.queryByLabelText('Search applications and files')).toBeNull();
+    expect(screen.queryByLabelText('Search applications')).toBeNull();
+  });
+
+  it('command palette runs allowlisted actions and natural-language commands', async () => {
+    await bootToDesktop();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    });
+    const input = await screen.findByLabelText('Command, app, file or sentence');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'open the process explorer' } });
+    });
+    expect(screen.getByText(/Understood as/)).toBeTruthy();
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(await screen.findByRole('dialog', { name: 'Process Explorer' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).toBeNull();
+  });
+
+  it('switches workspaces and keeps windows on their own workspace', async () => {
+    await bootToDesktop();
+    const center = screen.getByRole('dialog', { name: 'System Center' });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: '2', code: 'Digit2', altKey: true });
+    });
+    expect(wm.state.activeWorkspace).toBe(1);
+    expect(center.getAttribute('aria-hidden')).toBe('true');
+    await act(async () => {
+      wm.open('terminal');
+    });
+    expect(wm.windows.find((w) => w.appId === 'terminal')!.workspace).toBe(1);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: '1', code: 'Digit1', altKey: true });
+    });
+    expect(center.getAttribute('aria-hidden')).toBeNull();
+    expect(wm.windows.find((w) => w.appId === 'system-center')!.workspace).toBe(0);
   });
 
   it('closes windows from the title bar', async () => {
