@@ -268,6 +268,41 @@ describe('diagnostics', () => {
   });
 });
 
+describe('persistence safety', () => {
+  beforeEach(() => runtime.resetForTests());
+
+  it('never saves before stored data is loaded (tab hidden mid-boot)', async () => {
+    const storage = new MemoryStore();
+    await runtime.boot({ storage });
+    updateSettings({ accent: 'ember' });
+    runtime.fs.writeFile(`${HOME}/keep.txt`, 'mine');
+    await runtime.saveNow();
+    runtime.resetForTests();
+    // Simulate visibilitychange firing while boot is reading settings.
+    let midBootSave: boolean | undefined;
+    const racing = Object.assign(Object.create(storage) as MemoryStore, {
+      get: async (key: string) => {
+        if (key === 'settings') midBootSave = await runtime.saveNow();
+        return storage.get(key);
+      },
+    });
+    await runtime.boot({ storage: racing });
+    expect(midBootSave).toBe(false);
+    expect(settingsStore.get().accent).toBe('ember');
+    expect(runtime.fs.readFile(`${HOME}/keep.txt`)).toBe('mine');
+  });
+
+  it('factory reset is not undone by the save on page unload', async () => {
+    const storage = new MemoryStore();
+    await runtime.boot({ storage });
+    runtime.fs.writeFile(`${HOME}/gone.txt`, 'x');
+    await runtime.saveNow();
+    await runtime.factoryReset(false);
+    expect(await runtime.saveNow()).toBe(false);
+    expect(await storage.get('vfs')).toBeUndefined();
+  });
+});
+
 describe('services and astral', () => {
   beforeEach(() => runtime.resetForTests());
 

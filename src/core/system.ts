@@ -52,6 +52,12 @@ class Runtime {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribers: (() => void)[] = [];
   private booted = false;
+  /**
+   * True once stored data has been loaded. Until then nothing may be written:
+   * saving earlier (e.g. when the tab is hidden mid-boot) would overwrite the
+   * user's files and settings with defaults.
+   */
+  private loaded = false;
 
   uptimeMs(): number {
     return Date.now() - this.bootedAt;
@@ -111,6 +117,7 @@ class Runtime {
       }],
       ['persistence', 'Attaching persistence journal', async () => {
         this.attachPersistence();
+        this.loaded = true;
         return 'Autosave enabled';
       }],
       ['desktop', 'Starting desktop environment', async () => 'Ready'],
@@ -168,12 +175,14 @@ class Runtime {
   }
 
   scheduleSave(delay = 350): void {
+    if (!this.loaded) return;
     this.persistence.set((p) => (p.pending ? p : { ...p, pending: true }));
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.saveNow(), delay);
   }
 
   async saveNow(): Promise<boolean> {
+    if (!this.loaded) return false;
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = null;
     try {
@@ -236,6 +245,8 @@ class Runtime {
     this.unsubscribers.forEach((u) => u());
     this.unsubscribers = [];
     if (this.saveTimer) clearTimeout(this.saveTimer);
+    // Stop all saving first, or the reload's pagehide save would rewrite the erased data.
+    this.loaded = false;
     await this.storage.clear();
     events.log('session', 'Factory reset performed', 'warn');
     if (reload) location.reload();
@@ -247,6 +258,7 @@ class Runtime {
     this.unsubscribers = [];
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.booted = false;
+    this.loaded = false;
     this.fs = new VirtualFS();
     this.fsInstance.set(this.fs);
     this.storage = new MemoryStore();
