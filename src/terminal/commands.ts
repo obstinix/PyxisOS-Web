@@ -8,6 +8,7 @@ import { runDiagnostics, CheckStatus } from '../core/diagnostics';
 import { events } from '../core/events';
 import { wm } from '../core/windows';
 import { readStaticInfo } from '../core/metrics';
+import { getServices } from '../core/services';
 import { settingsStore } from '../core/settings';
 import { BUILD_DATE, BUILD_NAME, CHANNEL, CODENAME, LICENSE, OS_NAME, REPO_URL, SIM_KERNEL, VERSION } from '../core/version';
 
@@ -787,20 +788,10 @@ const pyxis: CommandSpec = {
       case 'doctor':
         return pyxisDoctor(ctx);
       case 'status': {
-        const p = runtime.persistence.get();
-        const { files, dirs } = ctx.fs.counts();
-        const lines: [string, string, 'ok' | 'warn' | 'err' | 'muted'][] = [
-          ['desktop-shell', 'running', 'ok'],
-          ['window-manager', `running · ${wm.windows.length} window(s)`, 'ok'],
-          ['vfs', `mounted · ${files} files, ${dirs} dirs`, 'ok'],
-          ['persistence', p.lastError ? `error · ${p.lastError}` : `${p.backend} · ${p.saves} saves`, p.lastError ? 'err' : p.backend === 'memory' ? 'warn' : 'ok'],
-          ['event-journal', `running · ${events.total} events`, 'ok'],
-          ['notifications', settingsStore.get().notifications ? 'enabled' : 'muted by user', 'ok'],
-          ['lunar-core', 'not available in browser build', 'muted'],
-          ['astral-consensus', 'not implemented (planned)', 'muted'],
-        ];
         ctx.out(`${pad('SERVICE', 18)}STATE`, 'muted');
-        for (const [name, state, tone] of lines) ctx.out(`${pad(name, 18)}${state}`, tone);
+        for (const svc of getServices()) {
+          ctx.out(`${pad(svc.id, 18)}${svc.state}`, svc.status === 'err' ? 'err' : svc.status);
+        }
         return 0;
       }
       case 'runtime': {

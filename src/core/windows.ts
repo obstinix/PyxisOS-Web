@@ -45,6 +45,8 @@ let seq = 0;
 export class WindowManager {
   readonly store = new Store<WindowManagerState>({ windows: [], focusedId: null, viewport: { w: 1280, h: 720 } });
   private zTop = 10;
+  /** Optional per-window guards; returning false cancels a close (e.g. unsaved changes). */
+  private closeGuards = new Map<string, () => boolean>();
 
   get state(): WindowManagerState {
     return this.store.get();
@@ -114,17 +116,28 @@ export class WindowManager {
     return win;
   }
 
-  close(id: string): void {
+  setCloseGuard(id: string, guard: (() => boolean) | null): void {
+    if (guard) this.closeGuards.set(id, guard);
+    else this.closeGuards.delete(id);
+  }
+
+  /** Close a window. Returns false if a close guard vetoed it. */
+  close(id: string, force = false): boolean {
     const win = this.get(id);
-    if (!win) return;
+    if (!win) return true;
+    const guard = this.closeGuards.get(id);
+    if (!force && guard && guard() === false) return false;
+    this.closeGuards.delete(id);
     this.store.set((s) => {
       const windows = s.windows.filter((w) => w.id !== id);
       return { ...s, windows, focusedId: s.focusedId === id ? topVisible(windows) : s.focusedId };
     });
     events.log('wm', `Closed ${win.title}`);
+    return true;
   }
 
   closeAll(): void {
+    this.closeGuards.clear();
     this.store.set((s) => ({ ...s, windows: [], focusedId: null }));
   }
 
