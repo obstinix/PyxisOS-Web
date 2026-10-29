@@ -51,7 +51,11 @@ const AppContent = memo(
   (a, b) => a.win.id === b.win.id && a.win.props === b.win.props,
 );
 
-export function Window({ win, focused }: { win: WindowState; focused: boolean }) {
+/** Below this workspace width every window is presented maximised. */
+export const COMPACT_WIDTH = 700;
+
+export function Window({ win, focused, compact }: { win: WindowState; focused: boolean; compact: boolean }) {
+  const maximized = win.maximized || compact;
   const ref = useRef<HTMLElement>(null);
   const meta = getApp(win.appId)!;
   const drag = useRef<{ mode: 'move' | Edge; startX: number; startY: number; start: Bounds; current: Bounds } | null>(null);
@@ -68,10 +72,10 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
     if (e.button !== 0) return;
     if (mode === 'move' && (e.target as HTMLElement).closest('button')) return;
     wm.focus(win.id);
-    if (win.maximized && mode !== 'move') return;
+    if (compact || (maximized && mode !== 'move')) return;
     e.preventDefault();
     let start = win.bounds;
-    if (win.maximized && mode === 'move') {
+    if (maximized && mode === 'move') {
       // Un-maximise under the cursor, keeping the grab point proportional.
       const ratio = (e.clientX - (ref.current?.getBoundingClientRect().left ?? 0)) / (ref.current?.offsetWidth || 1);
       const parent = ref.current?.parentElement?.getBoundingClientRect();
@@ -170,14 +174,14 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
   }, [focused, win.minimized]);
 
   const { x, y, w, h } = win.bounds;
-  const style = win.maximized
+  const style = maximized
     ? { zIndex: win.z }
     : { zIndex: win.z, transform: `translate(${x}px, ${y}px)`, width: w, height: h };
 
   return (
     <section
       ref={ref}
-      className={`window${focused ? ' focused' : ''}${win.maximized ? ' maximized' : ''}${win.minimized ? ' minimized' : ''}`}
+      className={`window${focused ? ' focused' : ''}${maximized ? ' maximized' : ''}${win.minimized ? ' minimized' : ''}`}
       style={style}
       role="dialog"
       aria-label={win.title}
@@ -195,7 +199,7 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
         onPointerMove={onMove}
         onPointerUp={end}
         onPointerCancel={end}
-        onDoubleClick={(e) => !(e.target as HTMLElement).closest('button') && wm.toggleMaximize(win.id)}
+        onDoubleClick={(e) => !compact && !(e.target as HTMLElement).closest('button') && wm.toggleMaximize(win.id)}
       >
         <span className="window-icon">
           <AppGlyph id={win.appId} size={15} />
@@ -205,14 +209,16 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
           <button className="wc" aria-label="Minimize" title="Minimize (Alt+Shift+↓)" onClick={() => wm.minimize(win.id)}>
             <Icon.minimize size={14} />
           </button>
-          <button
-            className="wc"
-            aria-label={win.maximized ? 'Restore' : 'Maximize'}
-            title={win.maximized ? 'Restore (Alt+Shift+↑)' : 'Maximize (Alt+Shift+↑)'}
-            onClick={() => wm.toggleMaximize(win.id)}
-          >
-            {win.maximized ? <Icon.restore size={14} /> : <Icon.maximize size={14} />}
-          </button>
+          {!compact && (
+            <button
+              className="wc"
+              aria-label={maximized ? 'Restore' : 'Maximize'}
+              title={maximized ? 'Restore (Alt+Shift+↑)' : 'Maximize (Alt+Shift+↑)'}
+              onClick={() => wm.toggleMaximize(win.id)}
+            >
+              {maximized ? <Icon.restore size={14} /> : <Icon.maximize size={14} />}
+            </button>
+          )}
           <button className="wc close" aria-label="Close" title="Close (Alt+W)" onClick={() => wm.close(win.id)}>
             <Icon.close size={14} />
           </button>
@@ -223,7 +229,7 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
           <AppContent win={win} />
         </AppErrorBoundary>
       </div>
-      {!win.maximized &&
+      {!maximized &&
         EDGES.map((edge) => (
           <div
             key={edge}

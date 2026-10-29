@@ -107,7 +107,7 @@ export class WindowManager {
       bounds,
       z: ++this.zTop,
       minimized: false,
-      maximized: viewport.w < 700,
+      maximized: false,
       props,
       openedAt: Date.now(),
     };

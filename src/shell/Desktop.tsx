@@ -8,7 +8,7 @@ import { notifications } from '../core/notifications';
 import { runDiagnostics } from '../core/diagnostics';
 import { HOME, joinPath } from '../core/path';
 import { CODENAME, CHANNEL } from '../core/version';
-import { Window } from './Window';
+import { COMPACT_WIDTH, Window } from './Window';
 import { Launcher } from './Launcher';
 import { AppTile, Icon, PyxisMark } from './icons';
 import { ContextMenuHost, DialogHost, MenuEntry, confirmDialog, openContextMenu, promptDialog, useNow } from './ui';
@@ -259,7 +259,8 @@ function DesktopIcons() {
 }
 
 export function Desktop() {
-  const { windows, focusedId } = useStore(wm.store);
+  const { windows, focusedId, viewport } = useStore(wm.store);
+  const compact = viewport.w < COMPACT_WIDTH;
   const settings = useStore(settingsStore);
   const unread = useStore(notifications.history).filter((n) => !n.read).length;
   const [launcher, setLauncher] = useState(false);
@@ -440,7 +441,7 @@ export function Desktop() {
       <main className="workspace" ref={workspaceRef} onContextMenu={desktopMenu}>
         <DesktopIcons />
         {windows.map((w) => (
-          <Window key={w.id} win={w} focused={w.id === focusedId} />
+          <Window key={w.id} win={w} focused={w.id === focusedId} compact={compact} />
         ))}
       </main>
       <Dock windows={windows} focusedId={focusedId} />
