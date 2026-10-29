@@ -1,4 +1,4 @@
-import { Component, ErrorInfo, ReactNode, memo, useCallback, useRef, PointerEvent as RPointerEvent, KeyboardEvent } from 'react';
+import { Component, ErrorInfo, ReactNode, memo, useCallback, useEffect, useRef, PointerEvent as RPointerEvent, KeyboardEvent } from 'react';
 import { WindowState, wm, Bounds } from '../core/windows';
 import { getApp } from '../core/apps';
 import { events } from '../core/events';
@@ -157,6 +157,18 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
     [win.id],
   );
 
+  // Move keyboard focus into a window when it becomes the focused window
+  // (e.g. opened from the terminal or dock) so typing reaches it.
+  useEffect(() => {
+    const el = ref.current;
+    if (!focused || win.minimized || !el || el.contains(document.activeElement)) return;
+    const target =
+      el.querySelector<HTMLElement>('[data-autofocus]:not([disabled])') ??
+      el.querySelector<HTMLElement>('.window-body textarea, .window-body input:not([type="hidden"]):not([type="file"]):not([disabled])') ??
+      el;
+    target.focus({ preventScroll: true });
+  }, [focused, win.minimized]);
+
   const { x, y, w, h } = win.bounds;
   const style = win.maximized
     ? { zIndex: win.z }
@@ -172,6 +184,7 @@ export function Window({ win, focused }: { win: WindowState; focused: boolean })
       aria-hidden={win.minimized || undefined}
       data-app={win.appId}
       data-window-id={win.id}
+      tabIndex={-1}
       onPointerDownCapture={() => !focused && wm.focus(win.id)}
       onFocusCapture={() => !focused && wm.focus(win.id)}
       onKeyDown={onKeyDown}

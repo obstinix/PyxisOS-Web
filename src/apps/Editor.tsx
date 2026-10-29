@@ -303,6 +303,7 @@ export function EditorApp({ win }: AppProps) {
             readOnly={doc.readonly}
             spellCheck={false}
             autoFocus
+            data-autofocus
             aria-label={`Editing ${doc.path ? basename(doc.path) : 'untitled document'}`}
             onChange={(e) => update(doc.key, { content: e.target.value })}
             onKeyDown={onKeyDown}

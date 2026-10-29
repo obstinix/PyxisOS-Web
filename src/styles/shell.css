@@ -452,12 +452,18 @@ button.status-ind:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-window);
-  overflow: hidden;
   animation: win-in var(--dur-slow) var(--ease);
   will-change: transform;
 }
 .window.focused {
   border-color: var(--border-strong);
+}
+.window:focus {
+  outline: none;
+}
+.window.maximized .window-titlebar,
+.window.maximized .window-body {
+  border-radius: 0;
 }
 .window.maximized {
   inset: 0;
@@ -479,6 +485,7 @@ button.status-ind:hover {
 }
 
 .window-titlebar {
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -536,6 +543,8 @@ button.status-ind:hover {
   position: relative;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px);
   display: flex;
   flex-direction: column;
 }
@@ -566,55 +575,55 @@ button.status-ind:hover {
 }
 .rz-n,
 .rz-s {
-  left: 8px;
-  right: 8px;
-  height: 6px;
+  left: 10px;
+  right: 10px;
+  height: 8px;
   cursor: ns-resize;
 }
 .rz-n {
-  top: -3px;
+  top: -4px;
 }
 .rz-s {
-  bottom: -3px;
+  bottom: -4px;
 }
 .rz-e,
 .rz-w {
-  top: 8px;
-  bottom: 8px;
-  width: 6px;
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
   cursor: ew-resize;
 }
 .rz-e {
-  right: -3px;
+  right: -4px;
 }
 .rz-w {
-  left: -3px;
+  left: -4px;
 }
 .rz-ne,
 .rz-nw,
 .rz-se,
 .rz-sw {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 .rz-ne {
-  top: -3px;
-  right: -3px;
+  top: -4px;
+  right: -4px;
   cursor: nesw-resize;
 }
 .rz-sw {
-  bottom: -3px;
-  left: -3px;
+  bottom: -4px;
+  left: -4px;
   cursor: nesw-resize;
 }
 .rz-nw {
-  top: -3px;
-  left: -3px;
+  top: -4px;
+  left: -4px;
   cursor: nwse-resize;
 }
 .rz-se {
-  bottom: -3px;
-  right: -3px;
+  bottom: -4px;
+  right: -4px;
   cursor: nwse-resize;
 }
 

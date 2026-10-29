@@ -76,7 +76,10 @@ export function TerminalApp({ win }: AppProps) {
     else append(pending);
     setCwd(session.cwd);
     setBusy(false);
-    requestAnimationFrame(() => inputRef.current?.focus());
+    // Do not steal focus from a window this command just opened.
+    requestAnimationFrame(() => {
+      if (wm.state.focusedId === win.id) inputRef.current?.focus();
+    });
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -171,7 +174,8 @@ export function TerminalApp({ win }: AppProps) {
             autoCorrect="off"
             spellCheck={false}
             aria-label="Terminal command input"
-            disabled={busy}
+            data-autofocus
+            readOnly={busy}
           />
         </div>
       </div>

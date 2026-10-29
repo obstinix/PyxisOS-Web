@@ -388,6 +388,7 @@ export function FilesApp({ win }: AppProps) {
             className="file-list"
             ref={listRef}
             tabIndex={0}
+            data-autofocus
             role="grid"
             aria-label={`Contents of ${displayPath(cwd)}`}
             aria-multiselectable="true"
